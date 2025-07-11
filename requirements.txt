@@ -7,3 +7,4 @@ langchain_text_splitters==0.3.8
 langchain_unstructured==0.1.6
 loguru==0.7.3
 SQLAlchemy==2.0.40
+psycopg==3.1.0
