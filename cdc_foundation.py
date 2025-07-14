@@ -5,12 +5,12 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_postgres import PGVector
 from sqlalchemy import create_engine, Table, MetaData, delete
 
-from aldea_site_loader import AldeaSiteLoader
+from smartmatch_site_loader import SmartMatchSiteLoader
 from configuration_values import ConfigurationValues
 
 
 def load_site() -> str:
-  site_loader = AldeaSiteLoader("https://www.cdcfoundation.org/request-for-proposals")
+  site_loader = SmartMatchSiteLoader("https://www.cdcfoundation.org/request-for-proposals")
   docs = site_loader.load_site()
   html_docs = list(filter(lambda doc: doc.page_content == "View RFQ", docs))
 

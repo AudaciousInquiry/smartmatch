@@ -3,7 +3,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 from configuration_values import ConfigurationValues
 
-class AldeaEmbeddings:
+class SmartMatchEmbeddings:
 
   def create_embeddings():
     # Create embeddings using the specified model
