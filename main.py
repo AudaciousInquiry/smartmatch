@@ -17,29 +17,45 @@ def scrape_cdc_foundation(site):
     response = requests.get(site["url"])
     soup = BeautifulSoup(response.text, "html.parser")
     rfps = []
-    # add logic to scrape the CDC Foundation site...
-
-    return rfps
-
-def scrape_cste(site):
-    response = requests.get(site["url"])
-    soup = BeautifulSoup(response.text, "html.parser")
-    rfps = []
-    # add logic to scrape the CSTE site...
+    # TODO: add scraping logic
     return rfps
 
 def scrape_nnphi(site):
     response = requests.get(site["url"])
     soup = BeautifulSoup(response.text, "html.parser")
     rfps = []
-   # add logic to scrape the NNPHI site...
+    # TODO: add scraping logic
     return rfps
+
+def scrape_astho(site):
+    response = requests.get(site["url"])
+    soup = BeautifulSoup(response.text, "html.parser")
+    rfps = []
+    # TODO: add scraping logic
+    return rfps
+
+def scrape_cste(site):
+    response = requests.get(site["url"])
+    soup = BeautifulSoup(response.text, "html.parser")
+    rfps = []
+    # TODO: add scraping logic
+    return rfps
+
+def scrape_aira(site):
+    response = requests.get(site["url"])
+    soup = BeautifulSoup(response.text, "html.parser")
+    rfps = []
+    # TODO: add scraping logic
+    return rfps
+
 
 # --- SCRAPER MAP ---
 SCRAPER_MAP = {
     "cdcfoundation": scrape_cdc_foundation,
     "cste": scrape_cste,
     "nnphi": scrape_nnphi,
+    "astho": scrape_astho,
+    "aira": scrape_aira,
 }
 
 def main():
