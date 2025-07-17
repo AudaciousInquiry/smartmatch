@@ -14,11 +14,44 @@ from prompts import get_prompt, get_competency_match_prompt
 
 # --- SCRAPER FUNCTIONS --- this can be moved to a separate file maybe siteloader
 def scrape_cdc_foundation(site):
-    response = requests.get(site["url"])
+    logger.info(f"Scraping site: {site['url']}")
+
+    try:
+        response = requests.get(site["url"], timeout=15)
+        response.raise_for_status()
+    except Exception as e:
+        logger.error(f"Failed to fetch {site['url']}: {e}")
+        return []
+
     soup = BeautifulSoup(response.text, "html.parser")
-    rfps = []
-    # TODO: add scraping logic
-    return rfps
+    full_text = soup.get_text(separator="\n", strip=True)
+
+    start_marker = "OPEN REQUESTS FOR PROPOSALS"
+    end_marker = "Please note that the CDC Foundation is not a traditional grantmaking foundation"
+
+    start_index = full_text.find(start_marker)
+    end_index = full_text.find(end_marker)
+
+    if start_index == -1 or end_index == -1 or end_index <= start_index:
+        logger.warning("Could not find RFP content between markers.")
+        return []
+
+    rfp_section = full_text[start_index + len(start_marker):end_index].strip()
+
+    if len(rfp_section) < 100:
+        logger.info("RFP section exists but appears to be empty or inactive (under 100 characters). Skipping.")
+        return []
+
+    logger.debug("Collected RFP Text:")
+    logger.debug(rfp_section)
+
+    return [{
+        "title": "CDC Foundation – Open RFP Section",
+        "url": site["url"],
+        "site": site["name"],
+        "content": rfp_section
+    }]
+
 
 def scrape_nnphi(site):
     response = requests.get(site["url"])
