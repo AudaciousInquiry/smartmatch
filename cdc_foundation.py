@@ -1,4 +1,6 @@
 from loguru import logger
+import requests
+from bs4 import BeautifulSoup, Tag
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -9,35 +11,63 @@ from smartmatch_site_loader import SmartMatchSiteLoader
 from configuration_values import ConfigurationValues
 
 
-def load_site() -> str:
-  site_loader = SmartMatchSiteLoader("https://www.cdcfoundation.org/request-for-proposals")
-  docs = site_loader.load_site()
-  html_docs = list(filter(lambda doc: doc.page_content == "View RFQ", docs))
+def scrape_cdc_foundation(site):
+    """
+    Scrape the CDC Foundation RFPs from the given site configuration.
+    Returns a list of dicts with keys: title, url, site, content
+    """
+    logger.info(f"Scraping CDC site: {site['url']}")
+    try:
+        response = requests.get(site['url'], timeout=15)
+        response.raise_for_status()
+    except Exception as e:
+        logger.error(f"Failed to fetch {site['url']}: {e}")
+        return []
 
-  logger.info(f"View RFQ link count: {len(html_docs)}")
-  
-  text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200,
-    length_function=len,
-    separators=["\n\n", "\n", " ", ""]
-  )
+    soup = BeautifulSoup(response.text, 'html.parser')
+    start_tag = soup.find(lambda tag: tag.name == 'p' and 'OPEN REQUESTS FOR PROPOSALS' in tag.get_text())
+    end_tag = soup.find(lambda tag: tag.name == 'p' and 'Please note that the CDC Foundation is not a traditional grantmaking foundation' in tag.get_text())
+    if not start_tag or not end_tag:
+        logger.warning('Could not find CDC RFP section markers.')
+        return []
 
-  source_url = html_docs[0].metadata['link_urls'][0]
+    snippet_html = ''
+    for elem in start_tag.next_siblings:
+        if elem == end_tag:
+            break
+        snippet_html += str(elem)
+    logger.debug(f"CDC HTML snippet:\n{snippet_html}")
 
-  loader = PyPDFLoader(source_url)
-  pdf_docs = loader.load_and_split(text_splitter)
-  
-  vector_store = PGVector(
-          embeddings=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2"),
-          collection_name="Aldea",
-          connection=ConfigurationValues.get_pgvector_connection(),
-          use_jsonb=True,
-      )  
-  deleted_count = delete_by_metadata({"source": source_url})
-  vector_store.add_documents(pdf_docs)  
+    snippet_soup = BeautifulSoup(snippet_html, 'html.parser')
+    proposals = []
+    current = []
+    for elem in snippet_soup.children:
+        if isinstance(elem, Tag) and elem.name == 'hr':
+            if current:
+                proposals.append(current)
+                current = []
+        elif isinstance(elem, Tag) and elem.name == 'p':
+            current.append(elem)
+    if current:
+        proposals.append(current)
 
-  return source_url
+    results = []
+    for group in proposals:
+        title_elem = group[0].find('strong') or group[0]
+        title = title_elem.get_text(strip=True)
+        url = site['url']
+        content_parts = []
+        for p in group[1:]:
+            link = p.find('a', href=True)
+            if link:
+                url = link['href']
+            content_parts.append(p.get_text(separator=' ', strip=True))
+        content = '\n'.join(content_parts)
+        results.append({'title': title, 'url': url, 'site': site['name'], 'content': content})
+        logger.debug(f"Parsed CDC RFP: {title} ({url})")
+    logger.info(f"Extracted {len(results)} CDC RFP(s)")
+    return results
+
   
 def delete_by_metadata(metadata_filter: dict) -> int:
     """
