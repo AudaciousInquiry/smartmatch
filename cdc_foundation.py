@@ -12,10 +12,6 @@ from configuration_values import ConfigurationValues
 
 
 def scrape_cdc_foundation(site):
-    """
-    Scrape the CDC Foundation RFPs from the given site configuration.
-    Returns a list of dicts with keys: title, url, site, content
-    """
     logger.info(f"Scraping CDC site: {site['url']}")
     try:
         response = requests.get(site['url'], timeout=15)
@@ -90,7 +86,6 @@ def delete_by_metadata(metadata_filter: dict) -> int:
     if 'cmetadata' not in doc_table.columns:
         raise ValueError(f"'cmetadata' column not found in table 'langchain_pg_embedding'. Available columns: {doc_table.columns.keys()}")
 
-    # Build WHERE clause from metadata
     conditions = [
         doc_table.c.cmetadata[key].astext == str(value)
         for key, value in metadata_filter.items()

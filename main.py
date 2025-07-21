@@ -13,18 +13,13 @@ import re
 from chains import get_competency_check_chain, get_default_chain
 from configuration_values import ConfigurationValues
 from competencies import get_competencies;
-from cdc_foundation import scrape_cdc_foundation
 from prompts import get_prompt, get_competency_match_prompt
 from sqlalchemy import create_engine, Table, Column, String, MetaData, select, text
 
+from cdc_foundation import scrape_cdc_foundation
+from nnphi import scrape_nnphi
+    
 # --- SCRAPER FUNCTIONS --- this can be moved to a separate file maybe siteloader
-def scrape_nnphi(site):
-    response = requests.get(site["url"])
-    soup = BeautifulSoup(response.text, "html.parser")
-    rfps = []
-    # TODO: add scraping logic
-    return rfps
-
 def scrape_astho(site):
     response = requests.get(site["url"])
     soup = BeautifulSoup(response.text, "html.parser")
