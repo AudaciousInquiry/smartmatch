@@ -32,8 +32,8 @@ class ConfigurationValues:
       return [
           {"name": "cdcfoundation", "url": "https://web.archive.org/web/20250113003138/https://www.cdcfoundation.org/request-for-proposals"},
           {"name": "nnphi", "url": "https://nnphi.org/news/funding-announcements/"},
-          {"name": "astho", "url": "https://www.astho.org/members/opportunities/"},
-          {"name": "cste", "url": "https://www.cste.org/page/RFP"},
+          {"name": "astho", "url": "https://web.archive.org/web/20250118131712/https://www.astho.org/members/opportunities/"},
+          {"name": "cste", "url": "https://web.archive.org/web/20200424184250/https://www.cste.org/page/RFP"},
           {"name": "aira", "url": "https://www.immregistries.org/opportunities"},
       ]
   

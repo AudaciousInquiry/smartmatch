@@ -1,8 +1,3 @@
-# file: nnphi.py
-"""
-Scrape the NNPHI funding announcements page for RFP listings.
-Returns a list of dicts: title, url, site, content (blank).
-"""
 from bs4 import BeautifulSoup
 from loguru import logger
 import requests
