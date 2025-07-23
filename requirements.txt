@@ -9,3 +9,4 @@ loguru==0.7.3
 SQLAlchemy==2.0.40
 psycopg==3.1.0
 beautifulsoup4
+python-dotenv

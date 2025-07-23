@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from bs4 import BeautifulSoup, Tag
 from loguru import logger
 import hashlib
@@ -20,6 +23,12 @@ from cdc_foundation import scrape_cdc_foundation
 from nnphi import scrape_nnphi
 from astho import scrape_astho
 from cste import scrape_cste
+
+from email_utils import send_email
+import os
+from io import StringIO
+LOG_BUFFER = StringIO()
+logger.add(LOG_BUFFER, level="DEBUG")
     
 # --- SCRAPER FUNCTIONS --- this can be moved to a separate file maybe siteloader
 def scrape_aira(site):
@@ -99,6 +108,14 @@ SCRAPER_MAP = {
     "aira": scrape_aira,
 }
 
+def format_new_rfps(new_rfps):
+    if not new_rfps:
+        return "No new RFPs found."
+    lines = ["New RFPs found:"]
+    for r in new_rfps:
+        lines.append(f"{r['site']}: {r['title']} ({r['url']})")
+    return "\n".join(lines)
+
 def main():
     logger.info('Initializing vector store and persistence store')
     vector_store = PGVector(
@@ -132,13 +149,17 @@ def main():
                     )
                 )
                 new_rfps.append(rfp)
-
+    main_body = format_new_rfps(new_rfps)
+    full_log_text = LOG_BUFFER.getvalue()
+    debug_body = f"{main_body}\n\n--- FULL LOG ---\n{full_log_text}"
     if new_rfps:
         print('New RFPs found:')
         for r in new_rfps:
             print(f"{r['site']}: {r['title']} ({r['url']})")
     else:
         print('No new RFPs found.')
+
+    return new_rfps
   
     ''' chain = get_default_chain(get_prompt(), vector_store, get_chat_model(), source_url)
   response = chain.invoke("""Provide a summary of the document and its contents focusing on technical requirements found in the document. 
@@ -163,12 +184,31 @@ def get_chat_model() -> ChatBedrock:
 
 if __name__ == '__main__':
     args = sys.argv[1:]
+    send_main  = '--email'       in args
+    send_debug = '--debug-email' in args
     engine = create_engine(ConfigurationValues.get_pgvector_connection())
     processed = init_processed_table(engine)
 
     if '--clear' in args:
         clear_processed(engine)
-    elif '--list' in args:
+        sys.exit(0)
+    if '--list' in args:
         list_processed(engine, processed)
-    else:
-        main()
+        sys.exit(0)
+
+    new_rfps = main()  # <-- now returns
+
+    if send_main and new_rfps:
+        body = format_new_rfps(new_rfps)
+        to_main = os.environ['MAIN_RECIPIENTS'].split(',')
+        send_email('New RFPs detected', body, to_main)
+
+    if send_debug:
+        body = format_new_rfps(new_rfps)
+        full_log = LOG_BUFFER.getvalue()
+        debug_body = f"{body}\n\n--- FULL LOG ---\n{full_log}"
+        to_debug = os.environ['DEBUG_RECIPIENTS'].split(',')
+        send_email('RFP Scraper Daily Debug Log', debug_body, to_debug)
+
+    engine.dispose()
+    sys.exit(0)
