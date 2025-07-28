@@ -32,7 +32,6 @@ def scrape_cdc_foundation(site):
         if elem == end_tag:
             break
         snippet_html += str(elem)
-    logger.debug(f"CDC HTML snippet:\n{snippet_html}")
 
     snippet_soup = BeautifulSoup(snippet_html, 'html.parser')
     proposals = []

@@ -196,19 +196,19 @@ if __name__ == '__main__':
         list_processed(engine, processed)
         sys.exit(0)
 
-    new_rfps = main()  # <-- now returns
+    new_rfps = main()
 
     if send_main and new_rfps:
         body = format_new_rfps(new_rfps)
         to_main = os.environ['MAIN_RECIPIENTS'].split(',')
-        send_email('New RFPs detected', body, to_main)
+        send_email('SmartMatch: New RFPs Found', body, to_main)
 
     if send_debug:
         body = format_new_rfps(new_rfps)
         full_log = LOG_BUFFER.getvalue()
         debug_body = f"{body}\n\n--- FULL LOG ---\n{full_log}"
         to_debug = os.environ['DEBUG_RECIPIENTS'].split(',')
-        send_email('RFP Scraper Daily Debug Log', debug_body, to_debug)
+        send_email('SmartMatch: Debug Log', debug_body, to_debug)
 
     engine.dispose()
     sys.exit(0)

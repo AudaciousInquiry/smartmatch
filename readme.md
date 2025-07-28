@@ -26,7 +26,7 @@ HINT:  The extension must first be installed on the system where PostgreSQL is r
 This is likely because you are attempting to connect to a native Windows PostgreSQL install instead of the docker container that has the pgvector enabled image because the native windows install bound to the port first.
 
 To fix, run the following commands in Powershell
-Stop-Service postgresql-x64-17
+Stop-Service -Name postgresql-x64-17 -Force (As admin)
 docker-compose down
 docker volume rm smartmatchai_pgdata
 docker-compose up --build
