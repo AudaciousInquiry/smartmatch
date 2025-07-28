@@ -23,20 +23,13 @@ from cdc_foundation import scrape_cdc_foundation
 from nnphi import scrape_nnphi
 from astho import scrape_astho
 from cste import scrape_cste
+from aira import scrape_aira
 
 from email_utils import send_email
 import os
 from io import StringIO
 LOG_BUFFER = StringIO()
 logger.add(LOG_BUFFER, level="DEBUG")
-    
-# --- SCRAPER FUNCTIONS --- this can be moved to a separate file maybe siteloader
-def scrape_aira(site):
-    response = requests.get(site["url"])
-    soup = BeautifulSoup(response.text, "html.parser")
-    rfps = []
-    # TODO: add scraping logic
-    return rfps
 
 def print_processed_rfps():
     from sqlalchemy import MetaData, Table, select
