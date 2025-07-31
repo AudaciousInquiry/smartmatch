@@ -10,8 +10,6 @@ import sys
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_postgres import PGVector
 from langchain_aws import ChatBedrock
-import requests
-import re
 
 from chains import get_competency_check_chain, get_default_chain
 from configuration_values import ConfigurationValues
@@ -119,7 +117,6 @@ def main():
     )
     engine = create_engine(ConfigurationValues.get_pgvector_connection())
     processed = init_processed_table(engine)
-
     new_rfps = []
     with engine.begin() as conn:
         for site in ConfigurationValues.get_websites():
@@ -142,16 +139,6 @@ def main():
                     )
                 )
                 new_rfps.append(rfp)
-    main_body = format_new_rfps(new_rfps)
-    full_log_text = LOG_BUFFER.getvalue()
-    debug_body = f"{main_body}\n\n--- FULL LOG ---\n{full_log_text}"
-    if new_rfps:
-        print('New RFPs found:')
-        for r in new_rfps:
-            print(f"{r['site']}: {r['title']} ({r['url']})")
-    else:
-        print('No new RFPs found.')
-
     return new_rfps
   
     ''' chain = get_default_chain(get_prompt(), vector_store, get_chat_model(), source_url)
@@ -174,34 +161,32 @@ def get_chat_model() -> ChatBedrock:
           temperature=0.0,
         )
  '''
-
-if __name__ == '__main__':
-    args = sys.argv[1:]
-    send_main  = '--email'       in args
-    send_debug = '--debug-email' in args
-    engine = create_engine(ConfigurationValues.get_pgvector_connection())
-    processed = init_processed_table(engine)
-
-    if '--clear' in args:
-        clear_processed(engine)
-        sys.exit(0)
-    if '--list' in args:
-        list_processed(engine, processed)
-        sys.exit(0)
-
+    
+    
+def process_and_email(send_main: bool, send_debug: bool):
     new_rfps = main()
-
+    main_body = format_new_rfps(new_rfps)
+    full_log_text = LOG_BUFFER.getvalue()
     if send_main and new_rfps:
-        body = format_new_rfps(new_rfps)
         to_main = os.environ['MAIN_RECIPIENTS'].split(',')
-        send_email('SmartMatch: New RFPs Found', body, to_main)
-
+        send_email('SmartMatch: New RFPs Found', main_body, to_main)
     if send_debug:
-        body = format_new_rfps(new_rfps)
-        full_log = LOG_BUFFER.getvalue()
-        debug_body = f"{body}\n\n--- FULL LOG ---\n{full_log}"
+        debug_body = f"{main_body}\n\n--- FULL LOG ---\n{full_log_text}"
         to_debug = os.environ['DEBUG_RECIPIENTS'].split(',')
         send_email('SmartMatch: Debug Log', debug_body, to_debug)
+    return new_rfps
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--email', action='store_true')
+    parser.add_argument('--debug-email', action='store_true')
+    args = parser.parse_args()
+
+    if args.email or args.debug_email:
+        process_and_email(send_main=args.email, send_debug=args.debug_email)
+    else:
+        main()
 
     engine.dispose()
     sys.exit(0)
