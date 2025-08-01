@@ -107,6 +107,7 @@ def format_new_rfps(new_rfps):
         lines.append(f"{r['site']}: {r['title']} ({r['url']})")
     return "\n".join(lines)
 
+
 def main():
     logger.info('Initializing vector store and persistence store')
     vector_store = PGVector(
