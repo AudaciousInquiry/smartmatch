@@ -24,6 +24,7 @@ from cste import scrape_cste
 from aira import scrape_aira
 
 from email_utils import send_email
+from bedrock_utils import summarize_rfp
 import os
 from io import StringIO
 LOG_BUFFER = StringIO()
@@ -108,6 +109,16 @@ def format_new_rfps(new_rfps):
     return "\n".join(lines)
 
 def main():
+
+    client = ChatBedrock(
+  model_id="us.meta.llama3-3-70b-instruct-v1:0",
+  temperature=0.0,
+  max_tokens=256,
+    )
+    resp = client.invoke("Hello, Bedrock!")
+    print(resp["answer"])
+
+
     logger.info('Initializing vector store and persistence store')
     vector_store = PGVector(
         embeddings=HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2'),
@@ -120,25 +131,25 @@ def main():
     new_rfps = []
     with engine.begin() as conn:
         for site in ConfigurationValues.get_websites():
-            scraper = SCRAPER_MAP.get(site['name'])
-            if not scraper:
-                continue
-            for rfp in scraper(site):
-                h = hashlib.sha256((rfp['title'] + rfp['url'] + rfp['content']).encode()).hexdigest()
+            for rfp in SCRAPER_MAP[site["name"]](site):
+                h = hashlib.sha256((rfp["title"] + rfp["url"]).encode()).hexdigest()
                 if conn.execute(select(processed.c.hash).where(processed.c.hash == h)).first():
-                    logger.debug(f"Skipping existing RFP: {rfp['title']}")
                     continue
+
+                summary = summarize_rfp(rfp["detail_content"])
+                rfp["summary"] = summary
+
                 vector_store.add_texts([rfp['content']], metadatas=[{'url': rfp['url'], 'site': rfp['site']}])
-                conn.execute(
-                    processed.insert().values(
-                        hash=h,
-                        title=rfp['title'],
-                        url=rfp['url'],
-                        site=rfp['site'],
-                        processed_at=datetime.datetime.utcnow().isoformat()
-                    )
-                )
+                conn.execute(processed.insert().values(
+                    hash=h,
+                    title=rfp["title"],
+                    url=rfp["url"],
+                    site=rfp["site"],
+                    processed_at=datetime.utcnow().isoformat()
+                ))
                 new_rfps.append(rfp)
+
+    engine.dispose()
     return new_rfps
   
     ''' chain = get_default_chain(get_prompt(), vector_store, get_chat_model(), source_url)
@@ -178,15 +189,30 @@ def process_and_email(send_main: bool, send_debug: bool):
 
 if __name__ == '__main__':
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--email', action='store_true')
     parser.add_argument('--debug-email', action='store_true')
+    parser.add_argument('--list', action='store_true', help='List processed RFPs')
+    parser.add_argument('--clear', action='store_true', help='Clear processed RFPs')
     args = parser.parse_args()
+
+    engine = create_engine(ConfigurationValues.get_pgvector_connection())
+    processed = init_processed_table(engine)
+
+    if args.clear:
+        clear_processed(engine)
+        print("Cleared processed_rfps")
+        sys.exit(0)
+
+    if args.list:
+        list_processed(engine, processed)
+        sys.exit(0)
 
     if args.email or args.debug_email:
         process_and_email(send_main=args.email, send_debug=args.debug_email)
     else:
         main()
 
-    engine.dispose()
     sys.exit(0)
+

@@ -13,3 +13,5 @@ python-dotenv
 fastapi
 apscheduler
 uvicorn
+boto3 
+amazon-aws-foundation-models

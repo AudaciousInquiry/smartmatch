@@ -25,8 +25,8 @@ HINT:  The extension must first be installed on the system where PostgreSQL is r
 
 This is likely because you are attempting to connect to a native Windows PostgreSQL install instead of the docker container that has the pgvector enabled image because the native windows install bound to the port first.
 
-To fix, run the following commands in Powershell
-Stop-Service -Name postgresql-x64-17 -Force (As admin)
+To fix, run the following commands in Powershell  (As admin)
+Stop-Service -Name postgresql-x64-17 -Force
 docker-compose down
 docker volume rm smartmatchai_pgdata
 docker-compose up --build
@@ -46,6 +46,20 @@ At line:1 ch
 Simply run this command
 
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+
+
+
+CREDENTIALS ISSUE
+
+If getting this
+
+Exception: Failed to create vector extension: (psycopg.OperationalError) connection failed: :1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+Ensure this line is in activate.bat
+set PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5432/smartmatch
+
+Also ensure you're in virtual env with
+.\.venv\Scripts\Activate.ps1  
 
 
 

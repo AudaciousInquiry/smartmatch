@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, Table, MetaData, delete
 from smartmatch_site_loader import SmartMatchSiteLoader
 from configuration_values import ConfigurationValues
 
+from detail_extractor import extract_detail_content
 
 def scrape_cdc_foundation(site):
     logger.info(f"Scraping CDC site: {site['url']}")
@@ -50,49 +51,29 @@ def scrape_cdc_foundation(site):
     for group in proposals:
         title_elem = group[0].find('strong') or group[0]
         title = title_elem.get_text(strip=True)
-        url = site['url']
+        detail_url = site['url']
         content_parts = []
         for p in group[1:]:
             link = p.find('a', href=True)
             if link:
-                url = link['href']
+                detail_url = link['href']
             content_parts.append(p.get_text(separator=' ', strip=True))
         content = '\n'.join(content_parts)
-        results.append({'title': title, 'url': url, 'site': site['name'], 'content': content})
-        logger.debug(f"Parsed CDC RFP: {title} ({url})")
+
+        detail = extract_detail_content(detail_url)
+        detail_content = detail["content"]
+        detail_source = detail["source_url"]
+
+        results.append({
+            'title': title,
+            'url': detail_url,
+            'site': site['name'],
+            'content': content,
+            'detail_content': detail_content,
+            'detail_source_url': detail_source,
+        })
+        logger.debug(f"Parsed CDC RFP: {title} ({detail_url})")
+        logger.debug(f"Detail content preview for '{title}': {detail_content[:400].replace(chr(10),' ')}")
+
     logger.info(f"Extracted {len(results)} CDC RFP(s)")
     return results
-
-  
-def delete_by_metadata(metadata_filter: dict) -> int:
-    """
-    Delete rows from a PGVector table based on metadata.
-
-    Args:
-        connection_string: SQLAlchemy connection string to Postgres.
-        table_name: The PGVector table name.
-        metadata_filter: Dictionary of metadata to filter by (e.g., {"category": "langchain"}).
-
-    Returns:
-        The number of rows deleted.
-    """
-    engine = create_engine(ConfigurationValues.get_pgvector_connection())
-    metadata = MetaData(schema="public")
-    conn = engine.connect()
-
-    doc_table = Table("langchain_pg_embedding", metadata, autoload_with=engine)
-
-    if 'cmetadata' not in doc_table.columns:
-        raise ValueError(f"'cmetadata' column not found in table 'langchain_pg_embedding'. Available columns: {doc_table.columns.keys()}")
-
-    conditions = [
-        doc_table.c.cmetadata[key].astext == str(value)
-        for key, value in metadata_filter.items()
-    ]
-
-    delete_stmt = delete(doc_table).where(*conditions)
-    result = conn.execute(delete_stmt)
-    conn.commit()
-    conn.close()
-
-    return result.rowcount
