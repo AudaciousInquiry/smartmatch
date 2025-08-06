@@ -109,16 +109,6 @@ def format_new_rfps(new_rfps):
     return "\n".join(lines)
 
 def main():
-
-    client = ChatBedrock(
-  model_id="us.meta.llama3-3-70b-instruct-v1:0",
-  temperature=0.0,
-  max_tokens=256,
-    )
-    resp = client.invoke("Hello, Bedrock!")
-    print(resp["answer"])
-
-
     logger.info('Initializing vector store and persistence store')
     vector_store = PGVector(
         embeddings=HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2'),
