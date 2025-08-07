@@ -1,0 +1,11 @@
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=smartmatchaialerts@gmail.com
+SMTP_PASS=''
+EMAIL_FROM=smartmatchaialerts@gmail.com
+MAIN_RECIPIENTS=brocke@pointclickcare.com
+DEBUG_RECIPIENTS=brocke@pointclickcare.com
+PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5432/smartmatch
+
+AWS_BEARER_TOKEN_BEDROCK=
+AWS_REGION=us-east-1
