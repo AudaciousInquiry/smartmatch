@@ -27,11 +27,10 @@ This is likely because you are attempting to connect to a native Windows Postgre
 
 To fix, run the following commands in Powershell  (As admin)
 Stop-Service -Name postgresql-x64-17 -Force
+cd C:\Users\brocke\Documents\GitHub\SmartMatchAI
 docker-compose down
 docker volume rm smartmatchai_pgdata
 docker-compose up --build
-
-
 
 
 EXECUTION POLICIES ERROR ON VIRTUAL ENVIRONMENT CREATION

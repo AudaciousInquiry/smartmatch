@@ -1,22 +1,41 @@
-from langchain_aws import ChatBedrock
+import os
+import requests
+from loguru import logger
 
-def summarize_rfp(text: str) -> str:
-    """Call Bedrock to get a concise summary of this RFP."""
-    model = ChatBedrock(
-        model_id="us.meta.llama3-3-70b-instruct-v1:0",
-        temperature=0.0,
-        max_tokens=512,
+def summarize_rfp(rfp_text: str) -> str:
+    api_key = os.getenv("AWS_BEARER_TOKEN_BEDROCK")
+    if not api_key:
+        raise RuntimeError("Set your Bedrock API key in AWS_BEARER_TOKEN_BEDROCK")
+
+    url = (
+        "https://bedrock-runtime.us-east-1.amazonaws.com/"
+        "model/us.anthropic.claude-3-7-sonnet-20250219-v1:0/invoke"
     )
-    prompt = f"""
-You are an expert grants administrator. Please read this Request for Proposals in full, then produce a 3–4 sentence summary that:
-- Clearly states the scope of work
-- Highlights any dollar amounts or contract value
-- Mentions key deliverables or deadlines
+    payload = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 1000,
+        "messages": [
+            {"role": "user", "content": f"Please summarize this RFP:\n\n{rfp_text}"}
+        ],
+    }
 
-RFP TEXT:
-\"\"\"
-{text}
-\"\"\""""
+    logger.debug(f"BEDROCK REQUEST PAYLOAD:\n{payload!r}")
+    resp = requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        json=payload
+    )
+    logger.info(f"→ Bedrock HTTP {resp.status_code}")
+    try:
+        resp.raise_for_status()
+    except Exception:
+        logger.error(f"BEDROCK RESPONSE ERROR: {resp.status_code} / {resp.text[:500]!r}")
+        raise
 
-    resp = model.invoke(prompt)
-    return resp["answer"].strip()
+    data = resp.json()
+    snippet = data.get("content", [{}])[0].get("text", "")[:2000]
+    logger.debug(f"BEDROCK RESPONSE:\n{snippet!r}")
+    return data["content"][0]["text"].strip()

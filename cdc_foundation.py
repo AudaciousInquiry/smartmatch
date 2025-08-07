@@ -1,15 +1,8 @@
 from loguru import logger
 import requests
 from bs4 import BeautifulSoup, Tag
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_postgres import PGVector
-from sqlalchemy import create_engine, Table, MetaData, delete
 
-from smartmatch_site_loader import SmartMatchSiteLoader
 from configuration_values import ConfigurationValues
-
 from detail_extractor import extract_detail_content
 
 def scrape_cdc_foundation(site):
@@ -22,8 +15,12 @@ def scrape_cdc_foundation(site):
         return []
 
     soup = BeautifulSoup(response.text, 'html.parser')
-    start_tag = soup.find(lambda tag: tag.name == 'p' and 'OPEN REQUESTS FOR PROPOSALS' in tag.get_text())
-    end_tag = soup.find(lambda tag: tag.name == 'p' and 'Please note that the CDC Foundation is not a traditional grantmaking foundation' in tag.get_text())
+    start_tag = soup.find(
+        lambda tag: tag.name == 'p' and 'OPEN REQUESTS FOR PROPOSALS' in tag.get_text()
+    )
+    end_tag = soup.find(
+        lambda tag: tag.name == 'p' and 'Please note that the CDC Foundation is not a traditional grantmaking foundation' in tag.get_text()
+    )
     if not start_tag or not end_tag:
         logger.warning('Could not find CDC RFP section markers.')
         return []
@@ -33,8 +30,8 @@ def scrape_cdc_foundation(site):
         if elem == end_tag:
             break
         snippet_html += str(elem)
-
     snippet_soup = BeautifulSoup(snippet_html, 'html.parser')
+
     proposals = []
     current = []
     for elem in snippet_soup.children:
@@ -51,6 +48,7 @@ def scrape_cdc_foundation(site):
     for group in proposals:
         title_elem = group[0].find('strong') or group[0]
         title = title_elem.get_text(strip=True)
+
         detail_url = site['url']
         content_parts = []
         for p in group[1:]:
@@ -60,20 +58,23 @@ def scrape_cdc_foundation(site):
             content_parts.append(p.get_text(separator=' ', strip=True))
         content = '\n'.join(content_parts)
 
-        detail = extract_detail_content(detail_url)
-        detail_content = detail["content"]
-        detail_source = detail["source_url"]
+        detail_text = extract_detail_content(detail_url)
+        detail_source = detail_url
 
         results.append({
             'title': title,
             'url': detail_url,
             'site': site['name'],
             'content': content,
-            'detail_content': detail_content,
+            'detail_content': detail_text,
             'detail_source_url': detail_source,
         })
+
         logger.debug(f"Parsed CDC RFP: {title} ({detail_url})")
-        logger.debug(f"Detail content preview for '{title}': {detail_content[:400].replace(chr(10),' ')}")
+        logger.debug(
+            f"Detail preview for '{title}': "
+            f"{detail_text[:200].replace(chr(10), ' ')}"
+        )
 
     logger.info(f"Extracted {len(results)} CDC RFP(s)")
     return results

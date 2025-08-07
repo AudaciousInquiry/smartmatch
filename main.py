@@ -4,7 +4,7 @@ load_dotenv()
 from bs4 import BeautifulSoup, Tag
 from loguru import logger
 import hashlib
-import datetime
+from datetime import datetime
 import sys
 
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -108,6 +108,21 @@ def format_new_rfps(new_rfps):
         lines.append(f"{r['site']}: {r['title']} ({r['url']})")
     return "\n".join(lines)
 
+def format_email_body(new_rfps):
+    lines = ["New RFPs found:\n"]
+    for r in new_rfps:
+        lines.append(f"• **{r['site']}** — {r['title']}")
+        lines.append(f"Link: {r['url']}")
+        pdf = r.get('detail_source_url')
+        if pdf and pdf.lower().endswith('.pdf') and pdf != r['url']:
+            lines.append(f"PDF: {pdf}")
+            summary = r.get('summary')
+        if summary:
+            lines.append("\nSummary:")
+            lines.append(summary)
+        lines.append("")
+    return "\n".join(lines)
+
 def main():
     logger.info('Initializing vector store and persistence store')
     vector_store = PGVector(
@@ -118,30 +133,47 @@ def main():
     )
     engine = create_engine(ConfigurationValues.get_pgvector_connection())
     processed = init_processed_table(engine)
+
     new_rfps = []
     with engine.begin() as conn:
         for site in ConfigurationValues.get_websites():
-            for rfp in SCRAPER_MAP[site["name"]](site):
+            scraper = SCRAPER_MAP.get(site['name'])
+            if not scraper:
+                continue
+
+            for rfp in scraper(site):
                 h = hashlib.sha256((rfp["title"] + rfp["url"]).encode()).hexdigest()
                 if conn.execute(select(processed.c.hash).where(processed.c.hash == h)).first():
                     continue
 
-                summary = summarize_rfp(rfp["detail_content"])
-                rfp["summary"] = summary
+                detail_src = rfp.get("detail_source_url", "")
+                if detail_src.lower().endswith('.pdf'):
+                    logger.info(f"Calling Bedrock to summarize RFP “{rfp['title']}” ({len(rfp.get('detail_content',''))} chars)")
+                    summary = summarize_rfp(rfp["detail_content"])
+                    logger.info(f"Received Bedrock summary ({len(summary)} chars) for “{rfp['title']}”")
+                    rfp["summary"] = summary
+                else:
+                    rfp["summary"] = None
 
-                vector_store.add_texts([rfp['content']], metadatas=[{'url': rfp['url'], 'site': rfp['site']}])
-                conn.execute(processed.insert().values(
-                    hash=h,
-                    title=rfp["title"],
-                    url=rfp["url"],
-                    site=rfp["site"],
-                    processed_at=datetime.utcnow().isoformat()
-                ))
+                vector_store.add_texts(
+                    [rfp['content']],
+                    metadatas=[{'url': rfp['url'], 'site': rfp['site']}]
+                )
+                conn.execute(
+                    processed.insert().values(
+                        hash=h,
+                        title=rfp["title"],
+                        url=rfp["url"],
+                        site=rfp["site"],
+                        processed_at=datetime.utcnow().isoformat()
+                    )
+                )
                 new_rfps.append(rfp)
 
     engine.dispose()
     return new_rfps
-  
+
+
     ''' chain = get_default_chain(get_prompt(), vector_store, get_chat_model(), source_url)
   response = chain.invoke("""Provide a summary of the document and its contents focusing on technical requirements found in the document. 
                           In the summary highlight any dates, deadlines, or timelines mentioned in the document. Also, provide any dollar 
@@ -163,18 +195,20 @@ def get_chat_model() -> ChatBedrock:
         )
  '''
     
-    
 def process_and_email(send_main: bool, send_debug: bool):
     new_rfps = main()
-    main_body = format_new_rfps(new_rfps)
+    main_body = format_email_body(new_rfps)
     full_log_text = LOG_BUFFER.getvalue()
+
     if send_main and new_rfps:
         to_main = os.environ['MAIN_RECIPIENTS'].split(',')
         send_email('SmartMatch: New RFPs Found', main_body, to_main)
+
     if send_debug:
         debug_body = f"{main_body}\n\n--- FULL LOG ---\n{full_log_text}"
         to_debug = os.environ['DEBUG_RECIPIENTS'].split(',')
         send_email('SmartMatch: Debug Log', debug_body, to_debug)
+
     return new_rfps
 
 if __name__ == '__main__':
