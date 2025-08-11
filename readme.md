@@ -61,8 +61,8 @@ If getting this
 
 Exception: Failed to create vector extension: (psycopg.OperationalError) connection failed: :1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
 
-Ensure this line is in activate.bat
-set PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5432/smartmatch
+Ensure the PGVECTOR_CONNECTION environment variable is set in you local .env file like so:
+PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5432/smartmatch
 
 Also ensure you're in virtual env with
 .\.venv\Scripts\Activate.ps1  
