@@ -4,7 +4,7 @@ load_dotenv()
 from bs4 import BeautifulSoup, Tag
 from loguru import logger
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 import sys
 
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -72,9 +72,6 @@ def clear_processed(engine):
         conn.execute(text('TRUNCATE TABLE public.processed_rfps'))
 
 def list_processed(engine, processed):
-    """
-    Print all processed RFP records from the database.
-    """
     with engine.connect() as conn:
         rows = conn.execute(
             select(
@@ -90,8 +87,6 @@ def list_processed(engine, processed):
     for processed_at, site, title, url, h in rows:
         print(f"{processed_at} | {site} | {title} | {url} | {h}")
 
-
-# --- SCRAPER MAP ---
 SCRAPER_MAP = {
     "cdcfoundation": scrape_cdc_foundation,
     "cste": scrape_cste,
@@ -116,7 +111,7 @@ def format_email_body(new_rfps):
         pdf = r.get('detail_source_url')
         if pdf and pdf.lower().endswith('.pdf') and pdf != r['url']:
             lines.append(f"PDF: {pdf}")
-            summary = r.get('summary')
+        summary = r.get('summary')
         if summary:
             lines.append("\nSummary:")
             lines.append(summary)
@@ -148,11 +143,17 @@ def main():
 
                 detail_src = rfp.get("detail_source_url", "")
                 if detail_src.lower().endswith('.pdf'):
-                    logger.info(f"Calling Bedrock to summarize RFP “{rfp['title']}” ({len(rfp.get('detail_content',''))} chars)")
-                    summary = summarize_rfp(rfp["detail_content"])
-                    logger.info(f"Received Bedrock summary ({len(summary)} chars) for “{rfp['title']}”")
-                    rfp["summary"] = summary
+                    try:
+                        detail_len = len(rfp.get('detail_content', '') or '')
+                        logger.info(f"Calling Bedrock to summarize RFP “{rfp['title']}” ({detail_len} chars)")
+                        summary = summarize_rfp(rfp.get("detail_content") or "")
+                        logger.info(f"Received Bedrock summary ({len(summary)} chars) for “{rfp['title']}”")
+                        rfp["summary"] = summary
+                    except Exception as e:
+                        logger.exception(f"Bedrock summarization failed for “{rfp['title']}”")
+                        rfp["summary"] = None
                 else:
+                    logger.info(f"Skipping Bedrock summarization for “{rfp['title']}” (no PDF detail)")
                     rfp["summary"] = None
 
                 vector_store.add_texts(
@@ -165,7 +166,7 @@ def main():
                         title=rfp["title"],
                         url=rfp["url"],
                         site=rfp["site"],
-                        processed_at=datetime.utcnow().isoformat()
+                        processed_at=datetime.now(timezone.utc).isoformat()
                     )
                 )
                 new_rfps.append(rfp)
@@ -173,28 +174,6 @@ def main():
     engine.dispose()
     return new_rfps
 
-
-    ''' chain = get_default_chain(get_prompt(), vector_store, get_chat_model(), source_url)
-  response = chain.invoke("""Provide a summary of the document and its contents focusing on technical requirements found in the document. 
-                          In the summary highlight any dates, deadlines, or timelines mentioned in the document. Also, provide any dollar 
-                          amounts if mentioned.""")
-  logger.info(f"Response: {response['answer']}")
-  
-  input("Press any key continue...")
-  competencies = get_competencies(vector_store)
-  competency_match_chain = get_competency_check_chain(get_competency_match_prompt(competencies), vector_store, get_chat_model(), source_url)
-
-  input("Press any key continue...")
-  response = competency_match_chain.invoke("On a scale of 1-10, do you think this aligns with the competencies listed below and should Audacious Inquiry bid on on the project and provide reasons.")
-  logger.info(f"Response: {response['answer']}")
-  
-def get_chat_model() -> ChatBedrock:
-  return ChatBedrock(model_id="us.meta.llama3-3-70b-instruct-v1:0",
-          max_tokens=1024,
-          temperature=0.0,
-        )
- '''
-    
 def process_and_email(send_main: bool, send_debug: bool):
     new_rfps = main()
     main_body = format_email_body(new_rfps)
@@ -239,4 +218,3 @@ if __name__ == '__main__':
         main()
 
     sys.exit(0)
-

@@ -16,6 +16,11 @@ DEFAULT_SPLITTER = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", " ", ""],
 )
 
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
 
 def extract_pdf_text(pdf_bytes, splitter=DEFAULT_SPLITTER) -> str:
     with NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
@@ -35,11 +40,25 @@ def extract_pdf_text(pdf_bytes, splitter=DEFAULT_SPLITTER) -> str:
         except Exception:
             pass
 
+def _headers(referer: str | None, accept: str = "*/*") -> dict:
+    h = {
+        "User-Agent": UA,
+        "Accept": accept,
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    if referer:
+        h["Referer"] = referer
+    return h
 
-def extract_detail_content(url: str, timeout: int = 15) -> str:
+def _get(session: requests.Session | None, url: str, headers: dict, timeout: int):
+    if session is not None:
+        return session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+    return requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+
+def extract_detail_content(url: str, timeout: int = 15, session: requests.Session | None = None, referer: str | None = None) -> str:
     logger.info(f"Extracting detail content from {url}")
     try:
-        resp = requests.get(url, timeout=timeout, allow_redirects=True)
+        resp = _get(session, url, _headers(referer), timeout)
         resp.raise_for_status()
     except Exception as e:
         logger.error(f"Failed to fetch detail URL {url}: {e}")
@@ -59,17 +78,18 @@ def extract_detail_content(url: str, timeout: int = 15) -> str:
         pdf_url = urljoin(final_url, pdf_link["href"])
         logger.debug(f"Found linked PDF: {pdf_url}")
         try:
-            pdf_resp = requests.get(pdf_url, timeout=timeout)
+            pdf_resp = _get(session, pdf_url, _headers(referer or final_url, accept="application/pdf,*/*;q=0.9"), timeout)
             pdf_resp.raise_for_status()
             return extract_pdf_text(pdf_resp.content)
         except Exception as e:
             logger.warning(f"Failed to fetch linked PDF {pdf_url}: {e}")
+
     iframe = soup.find(["iframe", "embed"], src=re.compile(r"\.pdf($|\?)", re.I))
     if iframe and iframe.get("src"):
         embedded_pdf_url = urljoin(final_url, iframe["src"])
         logger.debug(f"Found embedded PDF: {embedded_pdf_url}")
         try:
-            pdf_resp = requests.get(embedded_pdf_url, timeout=timeout)
+            pdf_resp = _get(session, embedded_pdf_url, _headers(referer or final_url, accept="application/pdf,*/*;q=0.9"), timeout)
             pdf_resp.raise_for_status()
             return extract_pdf_text(pdf_resp.content)
         except Exception as e:
