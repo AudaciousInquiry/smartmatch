@@ -13,6 +13,16 @@ set PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5432/smartm
 - Activate the virtual environment by running ".\.venv\Scripts\activate.bat" in the cmd.
 - Run "python main.py" to start the application.
 
+Commands
+python main.py  Run application with no emailing, just command line logging
+
+Flags
+--email Sends the user email after scraping if a new RFP was found
+--debug-email Sends the debug email, containing all the logs from a run. Sends even if nothing new was found
+--list Lists everything stored in the DB
+--clear Clears everything stored in the DB 
+
+
 Troubleshooting
 
 
