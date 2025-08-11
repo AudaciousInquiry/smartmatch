@@ -6,7 +6,8 @@
 - Verify the container is up by running "docker ps"
 - Create a venv and activate it so we install our dependencies in the right (local) location
 - Install dependencies by using pip install -r requirements.txt
-- Copy env variables from .env.template to .env and add values to .env
+- Copy environment variables from the .env.template to a .env file that you create (it is git-ignored) and add values to your personal .env file
+  - Note: Do NOT commit secret values to the .env.template file, only commit them to the local hidden .env file 
 - Run "python main.py" to start the application.
 
 Commands
