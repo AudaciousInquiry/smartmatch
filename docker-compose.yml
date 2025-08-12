@@ -6,24 +6,27 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: test
       POSTGRES_DB: smartmatch
+    # 5433 vs 5432 for host in case there is a local postgres instance running
     ports:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
-  # Commented out for now - uncomment when ready for full dockerization
-  # app:
-  #   build: .
-  #   container_name: smartmatchai_app
-  #   depends_on:
-  #     - postgres
-  #   volumes:
-  #     - .:/app
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     # Override the connection string for container-to-container communication
-  #     - PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@postgres:5432/smartmatch    
+  app:
+    build: .
+    container_name: smartmatchai_app
+    depends_on:
+      - postgres
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      # Override the connection string for container-to-container communication
+      # This is internal communication so the port stays as 5432 as its available on the container
+      - PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@postgres:5432/smartmatch
 
 volumes:
   pgdata:

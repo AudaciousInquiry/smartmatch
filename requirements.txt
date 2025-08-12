@@ -7,11 +7,8 @@ langchain_text_splitters==0.3.8
 langchain_unstructured==0.1.6
 loguru==0.7.3
 SQLAlchemy==2.0.40
-psycopg==3.1.0
-# Adding these versions of psycopg, commented out,
-# in case we need to sync with AIA one day and replace psycopg with below and re-run pip install
-# psycopg2-binary==2.9.10
-# psycopg[binary]
+psycopg2-binary==2.9.10
+psycopg[binary]
 beautifulsoup4
 python-dotenv
 fastapi
@@ -19,3 +16,4 @@ apscheduler
 uvicorn
 boto3
 python-dotenv==1.1.1
+email-validator

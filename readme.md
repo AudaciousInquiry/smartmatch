@@ -1,3 +1,59 @@
+## Running the project's various services
+
+### Option 1: Full Docker Stack (No environment setup needed)
+```shell
+# Run both database and API in Docker
+docker compose up -d
+
+# Access API at: http://localhost:8000
+# API docs at: http://localhost:8000/docs
+```
+
+### Option 2: Database in Docker + Local Development
+```shell
+# Run database only in Docker
+docker compose up -d postgres
+
+# Run API locally (more common for development)
+python -m uvicorn service:app --reload --port 8000
+
+# Run CLI locally
+python main.py
+# Note: many other arg options, see file
+```
+
+### Option 3: Local Development Only
+```shell
+# Config Console (run from within the rfp-console folder)
+npm run dev
+
+# API (local Python)
+python -m uvicorn service:app --reload --port 8000 
+
+# CLI (local Python)
+python main.py
+# Note: many other arg options, see file
+```
+
+### Docker Command Reference
+```shell
+# Start full stack
+docker compose up -d
+
+# Start only database
+docker compose up -d postgres
+
+# Stop services
+docker compose down
+
+# Rebuild and start
+docker compose up -d --build
+
+# View logs
+docker compose logs app
+docker compose logs postgres
+```
+
 ## Steps to setup the project
 - Download python 3.12.0 (https://www.python.org/downloads/release/python-3120/). Note: latest version 3.13 is causing conflicts for some libraries, so for now you need python 3.12
 - Download postgres latest https://www.postgresql.org/download/ and setup postgresql.
@@ -62,7 +118,7 @@ If getting this
 Exception: Failed to create vector extension: (psycopg.OperationalError) connection failed: :1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
 
 Ensure the PGVECTOR_CONNECTION environment variable is set in you local .env file like so:
-PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5432/smartmatch
+PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5433/smartmatch
 
 Also ensure you're in virtual env with
 .\.venv\Scripts\Activate.ps1  
