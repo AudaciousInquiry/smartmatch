@@ -11,6 +11,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  # Commented out for now - uncomment when ready for full dockerization
   # app:
   #   build: .
   #   container_name: smartmatchai_app
@@ -18,8 +19,11 @@ services:
   #     - postgres
   #   volumes:
   #     - .:/app
+  #   env_file:
+  #     - .env
   #   environment:
-  #     - PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@smartmatchai_pgvector:5432/smartmatch      
+  #     # Override the connection string for container-to-container communication
+  #     - PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@postgres:5432/smartmatch    
 
 volumes:
   pgdata:
