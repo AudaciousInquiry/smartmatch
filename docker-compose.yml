@@ -11,5 +11,15 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  # app:
+  #   build: .
+  #   container_name: smartmatchai_app
+  #   depends_on:
+  #     - postgres
+  #   volumes:
+  #     - .:/app
+  #   environment:
+  #     - PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@smartmatchai_pgvector:5432/smartmatch      
+
 volumes:
   pgdata:
