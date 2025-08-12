@@ -6,7 +6,8 @@
 - Verify the container is up by running "docker ps"
 - Create a venv and activate it so we install our dependencies in the right (local) location
 - Install dependencies by using pip install -r requirements.txt
-- Copy env variables from .env.template to .env and add values to .env
+- Copy environment variables from the .env.template to a .env file that you create (it is git-ignored) and add values to your personal .env file
+  - Note: Do NOT commit secret values to the .env.template file, only commit them to the local hidden .env file 
 - Run "python main.py" to start the application.
 
 Commands
@@ -60,8 +61,8 @@ If getting this
 
 Exception: Failed to create vector extension: (psycopg.OperationalError) connection failed: :1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
 
-Ensure this line is in activate.bat
-set PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5432/smartmatch
+Ensure the PGVECTOR_CONNECTION environment variable is set in you local .env file like so:
+PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5432/smartmatch
 
 Also ensure you're in virtual env with
 .\.venv\Scripts\Activate.ps1  
