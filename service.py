@@ -1,20 +1,28 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import (
     create_engine, Table, Column, String, Integer, Boolean,
     DateTime, JSON, MetaData, select, update, insert
 )
 import datetime
-import hashlib
 import os
 from typing import List, Optional
 
-from main import main, process_and_email
-from email_utils import send_email
 from configuration_values import ConfigurationValues
+from email_utils import send_email
+from main import main as run_scrape_main
 from loguru import logger
 
 app = FastAPI(title="SmartMatch Admin API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 engine = create_engine(ConfigurationValues.get_pgvector_connection())
 metadata = MetaData(schema="public")
@@ -37,6 +45,15 @@ email_settings = Table(
     Column("debug_recipients", JSON, nullable=False, default=[]),
     Column("created_at", DateTime, default=datetime.datetime.utcnow),
     Column("updated_at", DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow),
+)
+
+processed_rfps = Table(
+    "processed_rfps", metadata,
+    Column("hash", String, primary_key=True),
+    Column("title", String),
+    Column("url", String),
+    Column("site", String),
+    Column("processed_at", String),
 )
 
 metadata.create_all(engine)
@@ -81,6 +98,20 @@ def get_or_create_email_settings(conn):
         row = conn.execute(q).first()
     return row
 
+@app.get("/rfps")
+def list_rfps():
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                processed_rfps.c.processed_at,
+                processed_rfps.c.site,
+                processed_rfps.c.title,
+                processed_rfps.c.url,
+                processed_rfps.c.hash,
+            ).order_by(processed_rfps.c.processed_at.desc())
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
 @app.get("/schedule")
 def read_schedule():
     with engine.connect() as conn:
@@ -105,10 +136,7 @@ def update_schedule(payload: ScheduleUpdate):
             )
         )
         row = conn.execute(select(scrape_config).where(scrape_config.c.id == "singleton")).first()
-        return {
-            "enabled": row.enabled,
-            "interval_hours": row.interval_hours,
-        }
+        return {"enabled": row.enabled, "interval_hours": row.interval_hours}
 
 @app.get("/email-settings")
 def get_email_settings():
@@ -139,24 +167,5 @@ def set_email_settings(payload: EmailSettingsUpdate):
 
 @app.post("/scrape")
 def trigger_scrape(send_main: Optional[bool] = True, send_debug: Optional[bool] = False):
-    new_rfps = run_scrape() 
-    main_body = format_new_rfps(new_rfps)
-    with engine.connect() as conn:
-        email_conf = get_or_create_email_settings(conn)
-    if send_main and new_rfps:
-        send_email("SmartMatch: New RFPs Found", main_body, email_conf.main_recipients)
-    if send_debug:
-        full_log = "" 
-        debug_body = f"{main_body}\n\n--- FULL LOG ---\n{full_log}"
-        send_email("SmartMatch: Debug Log", debug_body, email_conf.debug_recipients)
-    with engine.begin() as conn:
-        now = datetime.datetime.utcnow()
-        row = get_or_create_config(conn)
-        interval = row.interval_hours
-        next_run = now + datetime.timedelta(hours=interval)
-        conn.execute(
-            update(scrape_config)
-            .where(scrape_config.c.id == "singleton")
-            .values(last_run_at=now, next_run_at=next_run, updated_at=datetime.datetime.utcnow())
-        )
+    new_rfps = run_scrape_main()
     return {"new_count": len(new_rfps), "new_rfps": new_rfps}
