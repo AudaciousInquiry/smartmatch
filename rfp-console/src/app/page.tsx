@@ -38,7 +38,7 @@ export default function Home() {
   const onRunNow = async () => {
     setRunning(true);
     try {
-      const res = await triggerScrape(false, true);
+      const res = await triggerScrape(true, true);
       alert(`Scrape complete. Found ${res.data.new_count} new RFPs.`);
       await load();
     } finally {
@@ -104,7 +104,7 @@ export default function Home() {
             disabled={running}
             className="rounded-lg bg-black text-white px-3 py-2 hover:opacity-90"
           >
-            {running ? "Running…" : "Run Now (debug only)"}
+            {running ? "Running…" : "Run Now"}
           </button>
         </div>
       </header>

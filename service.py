@@ -8,6 +8,7 @@ from sqlalchemy import (
 import datetime
 import os
 from typing import List, Optional
+from importlib import reload
 
 from configuration_values import ConfigurationValues
 from email_utils import send_email
@@ -166,6 +167,23 @@ def set_email_settings(payload: EmailSettingsUpdate):
         }
 
 @app.post("/scrape")
-def trigger_scrape(send_main: Optional[bool] = True, send_debug: Optional[bool] = False):
-    new_rfps = run_scrape_main()
-    return {"new_count": len(new_rfps), "new_rfps": new_rfps}
+def trigger_scrape(send_main: Optional[bool] = True, send_debug: Optional[bool] = True):
+    try:
+        import sys
+        from pathlib import Path
+        
+        project_root = str(Path(__file__).parent)
+        if project_root not in sys.path:
+            sys.path.append(project_root)
+        
+        import configuration_values
+        import main
+        reload(configuration_values)
+        reload(main)
+        
+        new_rfps = main.process_and_email(send_main=send_main, send_debug=send_debug)
+        
+        return {"new_count": len(new_rfps), "new_rfps": new_rfps}
+    except Exception as e:
+        logger.exception(f"Error during scrape: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
