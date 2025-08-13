@@ -12,6 +12,7 @@ export type RfpRow = {
   processed_at: string | null;
 };
 
+// Refresh
 export const listRfps = (params?: { q?: string; limit?: number; offset?: number; sort?: string; order?: "asc" | "desc" }) =>
   api.get<RfpRow[]>("/rfps", { params });
 
@@ -23,5 +24,6 @@ export const getEmailSettings = () => api.get("/email-settings");
 export const setEmailSettings = (data: { main_recipients: string[]; debug_recipients: string[] }) =>
   api.put("/email-settings", data);
 
+// Run
 export const triggerScrape = (send_main: boolean, send_debug: boolean) =>
   api.post("/scrape", null, { params: { send_main, send_debug } });
