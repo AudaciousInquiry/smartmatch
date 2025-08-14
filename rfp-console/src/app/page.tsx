@@ -2,6 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { listRfps, triggerScrape, type RfpRow } from "./lib/api";
+import { 
+  RefreshIcon, 
+  CalendarIcon, 
+  LightningIcon, 
+  TrashIcon, 
+  SortIcon 
+} from "../components/Icons";
 
 function fmt(dt: string | null) {
   if (!dt) return "";
@@ -14,10 +21,12 @@ export default function Home() {
   const [rows, setRows] = useState<RfpRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
-  const [q, setQ] = useState("");
+  const [scheduling, setScheduling] = useState(false);
+  const [q, setQ] = useState("");  
   
   const [sortField, setSortField] = useState<keyof RfpRow>("processed_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [filterText, setFilterText] = useState("");
   
   const load = async () => {
     setLoading(true);
@@ -33,11 +42,6 @@ export default function Home() {
     load();
   }, []);
 
-  const onSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await load();
-  };
-
   const onRunNow = async () => {
     setRunning(true);
     try {
@@ -46,6 +50,17 @@ export default function Home() {
       await load();
     } finally {
       setRunning(false);
+    }
+  };
+
+  const onScheduleRun = async () => {
+    setScheduling(true);
+    try {
+      // Placeholder for schedule functionality
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call
+      alert('Mock API Call: Scrape and Email scheduled successfully!');
+    } finally {
+      setScheduling(false);
     }
   };
 
@@ -60,10 +75,30 @@ export default function Home() {
     }
   };
 
-  const sortedRows = useMemo(() => {
-    if (!rows.length) return rows;
+  const filteredAndSortedRows = useMemo(() => {
+    // First filter the data
+    let filteredRows = rows;
     
-    return [...rows].sort((a, b) => {
+    if (filterText.trim()) {
+      const searchTerm = filterText.toLowerCase().trim();
+      filteredRows = rows.filter((row) => {
+        // Search across all text fields
+        const searchableText = [
+          row.site || "",
+          row.title || "",
+          row.url || "",
+          row.hash || "",
+          fmt(row.processed_at) || ""
+        ].join(" ").toLowerCase();
+        
+        return searchableText.includes(searchTerm);
+      });
+    }
+    
+    // Then sort the filtered results
+    if (!filteredRows.length) return filteredRows;
+    
+    return [...filteredRows].sort((a, b) => {
       let aVal = a[sortField];
       let bVal = b[sortField];
       
@@ -87,33 +122,7 @@ export default function Home() {
       if (aStr > bStr) return sortDirection === "asc" ? 1 : -1;
       return 0;
     });
-  }, [rows, sortField, sortDirection]);
-
-  const SortIcon = ({ field }: { field: keyof RfpRow }) => {
-    if (sortField !== field) {
-      return (
-        <span className="ml-2 text-gray-400 opacity-50">
-          <svg className="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-          </svg>
-        </span>
-      );
-    }
-    
-    return (
-      <span className="ml-2 text-blue-400">
-        {sortDirection === "asc" ? (
-          <svg className="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4l6 6 6-6" />
-          </svg>
-        ) : (
-          <svg className="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 20l-6-6-6 6" />
-          </svg>
-        )}
-      </span>
-    );
-  };
+  }, [rows, filterText, sortField, sortDirection]);
 
   const table = useMemo(
     () => (
@@ -126,40 +135,50 @@ export default function Home() {
                 onClick={() => handleSort("processed_at")}
               >
                 Date Found
-                <SortIcon field="processed_at" />
+                <span className={`ml-2 ${sortField === 'processed_at' ? 'text-blue-400' : 'text-gray-400 opacity-50'}`}>
+                  <SortIcon direction={sortField === 'processed_at' ? sortDirection : null} />
+                </span>
               </th>
               <th 
                 className="p-4 text-left font-medium cursor-pointer hover:bg-gray-600/50 transition-colors select-none"
                 onClick={() => handleSort("site")}
               >
                 Source
-                <SortIcon field="site" />
+                <span className={`ml-2 ${sortField === 'site' ? 'text-blue-400' : 'text-gray-400 opacity-50'}`}>
+                  <SortIcon direction={sortField === 'site' ? sortDirection : null} />
+                </span>
               </th>
               <th 
                 className="p-4 text-left font-medium cursor-pointer hover:bg-gray-600/50 transition-colors select-none"
                 onClick={() => handleSort("title")}
               >
                 Name of Opportunity
-                <SortIcon field="title" />
+                <span className={`ml-2 ${sortField === 'title' ? 'text-blue-400' : 'text-gray-400 opacity-50'}`}>
+                  <SortIcon direction={sortField === 'title' ? sortDirection : null} />
+                </span>
               </th>
               <th 
                 className="p-4 text-left font-medium cursor-pointer hover:bg-gray-600/50 transition-colors select-none"
                 onClick={() => handleSort("url")}
               >
                 Link
-                <SortIcon field="url" />
+                <span className={`ml-2 ${sortField === 'url' ? 'text-blue-400' : 'text-gray-400 opacity-50'}`}>
+                  <SortIcon direction={sortField === 'url' ? sortDirection : null} />
+                </span>
               </th>
               <th 
                 className="p-4 text-left font-medium cursor-pointer hover:bg-gray-600/50 transition-colors select-none"
                 onClick={() => handleSort("hash")}
               >
                 Hash
-                <SortIcon field="hash" />
+                <span className={`ml-2 ${sortField === 'hash' ? 'text-blue-400' : 'text-gray-400 opacity-50'}`}>
+                  <SortIcon direction={sortField === 'hash' ? sortDirection : null} />
+                </span>
               </th>
             </tr>
           </thead>
           <tbody className="text-gray-200">
-            {sortedRows.map((r, index) => (
+            {filteredAndSortedRows.map((r, index) => (
               <tr key={r.hash} className={`border-t border-gray-700/30 hover:bg-gray-700/30 transition-colors ${index % 2 === 0 ? 'bg-gray-800/20' : 'bg-gray-800/40'}`}>
                 <td className="p-4 whitespace-nowrap text-gray-300">{fmt(r.processed_at)}</td>
                 <td className="p-4 text-blue-400 font-medium">{r.site}</td>
@@ -172,10 +191,10 @@ export default function Home() {
                 <td className="p-4 font-mono text-xs text-gray-400 bg-gray-900/30 rounded">{r.hash.slice(0, 10)}…</td>
               </tr>
             ))}
-            {!sortedRows.length && !loading && (
+            {!filteredAndSortedRows.length && !loading && (
               <tr>
                 <td className="p-8 text-center text-gray-400" colSpan={5}>
-                  No rows found
+                  {filterText.trim() ? `No results found for "${filterText}"` : "No rows found"}
                 </td>
               </tr>
             )}
@@ -183,7 +202,7 @@ export default function Home() {
         </table>
       </div>
     ),
-    [sortedRows, loading]
+    [filteredAndSortedRows, loading]
   );
 
   return (
@@ -196,29 +215,66 @@ export default function Home() {
             disabled={loading}
             className="rounded-lg bg-gray-700/70 text-gray-200 border border-gray-600/50 px-4 py-2 hover:bg-gray-600/70 hover:text-white hover:border-gray-500/70 active:bg-gray-800/80 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 backdrop-blur-sm shadow-md"
           >
-            {loading ? "Loading…" : "Refresh"}
+            <span className="flex items-center gap-2">
+              <RefreshIcon />
+              {loading ? "Loading…" : "Refresh"}
+            </span>
+          </button>
+          <button
+            onClick={onScheduleRun}
+            disabled={scheduling}
+            className="rounded-lg bg-purple-600/80 text-white border border-purple-500/50 px-4 py-2 hover:bg-purple-500/90 hover:border-purple-400/70 active:bg-purple-700/90 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 backdrop-blur-sm shadow-md"
+          >
+            <span className="flex items-center gap-2">
+              <CalendarIcon />
+              {scheduling ? "Scheduling…" : "Schedule Run"}
+            </span>
           </button>
           <button
             onClick={onRunNow}
             disabled={running}
             className="rounded-lg bg-blue-600/80 text-white border border-blue-500/50 px-4 py-2 hover:bg-blue-500/90 hover:border-blue-400/70 active:bg-blue-700/90 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 backdrop-blur-sm shadow-md"
           >
-            {running ? "Running…" : "Run Now"}
+            <span className="flex items-center gap-2">
+              <LightningIcon />
+              {running ? "Running…" : "Run Now"}
+            </span>
           </button>
         </div>
       </header>
 
-      <form onSubmit={onSearch} className="flex gap-3 bg-gray-800/40 backdrop-blur-sm rounded-xl p-4 border border-gray-700/50 shadow-lg">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search via date, source, name, link, or hash..."
-          className="flex-1 max-w-md rounded-lg bg-gray-700/60 text-gray-200 placeholder-gray-400 border border-gray-600/50 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 backdrop-blur-sm transition-all duration-200"
-        />
-        <button className="rounded-lg bg-gray-700/70 text-gray-200 border border-gray-600/50 px-4 py-3 hover:bg-gray-600/70 hover:text-white hover:border-gray-500/70 active:bg-gray-800/80 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md">
-          Search
-        </button>
-      </form>
+      <div className="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 shadow-lg space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-white mb-1">Find Opportunities</h2>
+            <p className="text-sm text-gray-400">Search and filter through current results</p>
+          </div>
+          <div className="flex items-center">
+            {filterText && (
+              <button
+                onClick={() => setFilterText("")}
+                className="rounded-lg bg-gray-600/70 text-gray-200 border border-gray-500/50 px-3 py-3 hover:bg-red-600/60 hover:text-white hover:border-red-500/50 active:bg-red-700/70 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md flex items-center gap-2"
+                title="Clear filter"
+              >
+                <TrashIcon />
+                Clear Filter
+              </button>
+            )}
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <input
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+            placeholder="Type to search..."
+            className="flex-1 max-w-md rounded-lg bg-gray-700/60 text-gray-200 placeholder-gray-400 border border-gray-600/50 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500/50 backdrop-blur-sm transition-all duration-200"
+          />
+          <div className="text-sm text-gray-400">
+            Displaying {filteredAndSortedRows.length} of {rows.length} opportunities
+          </div>
+        </div>
+      </div>
 
       {table}
     </main>
