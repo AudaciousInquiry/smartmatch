@@ -1,48 +1,75 @@
 from bs4 import BeautifulSoup, Tag
 from loguru import logger
 import requests
+from urllib.parse import urljoin
 
-from configuration_values import ConfigurationValues
+from detail_extractor import extract_detail_content
 
 
 def scrape_aira(site):
     logger.info(f"Scraping AIRA site: {site['url']}")
     try:
-        resp = requests.get(site['url'], timeout=15)
-        resp.raise_for_status()
+        response = requests.get(site["url"], timeout=15)
+        response.raise_for_status()
     except Exception as e:
         logger.error(f"Failed to fetch {site['url']}: {e}")
         return []
-
-    soup = BeautifulSoup(resp.text, 'html.parser')
-    header = soup.find(lambda t: t.name == 'p' and t.find('span') and 'Requests for Proposals' in t.get_text())
-    if not header:
-        logger.warning('Could not find Requests for Proposals header.')
+    
+    soup = BeautifulSoup(response.text, "html.parser")
+    rfp_section = soup.find("a", {"name": "RFP"})
+    if not rfp_section:
+        logger.warning("Could not find AIRA RFP section.")
         return []
 
-    default = header.find_next_sibling(lambda t: t.name == 'p' and 'There are no requests for proposals' in t.get_text())
-    if default:
-        logger.info('No active AIRA RFPs (found default text).')
+    results = []
+    rfp_content = rfp_section.find_parent("p")
+    if not rfp_content:
+        logger.warning("Could not find AIRA RFP content.")
         return []
 
-    content_chunks = []
-    for sib in header.next_siblings:
-        if isinstance(sib, Tag) and sib.name == 'hr':
+    for p in rfp_content.find_next_siblings("p"):
+        if p.find("span", style=lambda s: s and "color: #629f44" in s):
             break
-        if isinstance(sib, Tag):
-            text = sib.get_text(separator=' ', strip=True)
-            if text:
-                content_chunks.append(text)
 
-    content = '\n'.join(content_chunks)
-    if not content:
-        content = 'AIRA RFP section has been updated.'
+        content_parts = []
+        pdf_urls = []
 
-    results = [{
-        'title': 'AIRA – RFP Section Updated',
-        'url': site['url'],
-        'site': site['name'],
-        'content': content
-    }]
+        text = p.get_text(separator=" ", strip=True)
+        if text:
+            content_parts.append(text)
+
+        for a in p.find_all("a", href=True):
+            href = a["href"]
+            if "pdf" in href.lower():
+                pdf_urls.append(href)
+
+        if not pdf_urls:
+            continue
+
+        main_pdf_url = pdf_urls[0]
+        detail_content = extract_detail_content(main_pdf_url)
+
+        pdf_links = [f"PDF: {url}" for url in pdf_urls]
+        inline_content = "\n".join(content_parts + pdf_links)
+
+        title = content_parts[0][:80].strip()
+        if len(content_parts[0]) > 80:
+            title += "..."
+
+        result = {
+            "title": title, 
+            "url": main_pdf_url,
+            "site": site["name"],
+            "content": inline_content,
+            "detail_content": detail_content,
+            "detail_source_url": main_pdf_url,
+        }
+        results.append(result)
+
+        logger.debug(f"Parsed AIRA RFP: {title} ({main_pdf_url})")
+        if detail_content:
+            preview = detail_content[:200].replace("\n", " ")
+            logger.debug(f"Detail preview: {preview}")
+
     logger.info(f"Extracted {len(results)} AIRA RFP(s)")
     return results
