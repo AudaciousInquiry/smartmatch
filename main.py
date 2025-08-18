@@ -16,6 +16,8 @@ from configuration_values import ConfigurationValues
 from competencies import get_competencies;
 from prompts import get_prompt, get_competency_match_prompt
 from sqlalchemy import create_engine, Table, Column, String, MetaData, select, text
+from sqlalchemy import LargeBinary
+import requests
 
 from cdc_foundation import scrape_cdc_foundation
 from nnphi import scrape_nnphi
@@ -27,29 +29,40 @@ from email_utils import send_email
 from bedrock_utils import summarize_rfp
 import os
 from io import StringIO
+
 LOG_BUFFER = StringIO()
 logger.add(LOG_BUFFER, level="DEBUG")
 
 def print_processed_rfps():
-    from sqlalchemy import MetaData, Table, select
     engine = create_engine(ConfigurationValues.get_pgvector_connection())
-    metadata = MetaData(schema="public")
-    processed = Table("processed_rfps", metadata, autoload_with=engine)
-
+    processed = init_processed_table(engine)
+    
     with engine.connect() as conn:
         rows = conn.execute(
-            select(
-                processed.c.processed_at,
-                processed.c.site,
-                processed.c.title,
-                processed.c.url,
-                processed.c.hash
-            ).order_by(processed.c.processed_at.desc())
-        ).all()
+            select(processed).order_by(processed.c.processed_at.desc())
+        ).fetchall()
 
-    print("\nAlready-processed RFPs:\n")
-    for processed_at, site, title, url, h in rows:
-        print(f"{processed_at} | {site:12} | {title[:50]:50} | {url} | {h}")
+    print('\nAlready-processed RFPs:')
+    for row in rows:
+        print('=' * 100)
+        print(f"Processed At: {row.processed_at}")
+        print(f"Site: {row.site}")
+        print(f"Title: {row.title}")
+        print(f"URL: {row.url}")
+        print(f"Hash: {row.hash}")
+
+        if row.detail_content:
+            content = row.detail_content[:300] + "..." if len(row.detail_content) > 300 else row.detail_content
+            print(f"\nContent Preview:\n{content}")
+        
+        if row.ai_summary:
+            summary = row.ai_summary[:300] + "..." if len(row.ai_summary) > 300 else row.ai_summary
+            print(f"\nAI Summary:\n{summary}")
+        
+        if row.pdf_content:
+            print(f"\nPDF Size: {len(row.pdf_content):,} bytes")
+        
+        print('\n' + '-' * 100)
 
 def init_processed_table(engine):
     metadata = MetaData(schema='public')
@@ -60,8 +73,20 @@ def init_processed_table(engine):
         Column('url', String),
         Column('site', String),
         Column('processed_at', String),
+        Column('detail_content', String),
+        Column('ai_summary', String),
+        Column('pdf_content', LargeBinary)
     )
     metadata.create_all(engine)
+    
+    with engine.begin() as conn:
+        conn.execute(text("""
+            ALTER TABLE public.processed_rfps 
+            ADD COLUMN IF NOT EXISTS detail_content TEXT,
+            ADD COLUMN IF NOT EXISTS ai_summary TEXT,
+            ADD COLUMN IF NOT EXISTS pdf_content BYTEA;
+        """))
+    
     return processed
 
 from sqlalchemy import text
@@ -74,18 +99,30 @@ def clear_processed(engine):
 def list_processed(engine, processed):
     with engine.connect() as conn:
         rows = conn.execute(
-            select(
-                processed.c.processed_at,
-                processed.c.site,
-                processed.c.title,
-                processed.c.url,
-                processed.c.hash
-            ).order_by(processed.c.processed_at.desc())
+            select(processed).order_by(processed.c.processed_at.desc())
         ).fetchall()
 
-    print('Already-processed RFPs:')
-    for processed_at, site, title, url, h in rows:
-        print(f"{processed_at} | {site} | {title} | {url} | {h}")
+    print('\nAlready-processed RFPs:')
+    for row in rows:
+        print('=' * 100)
+        print(f"Processed At: {row.processed_at}")
+        print(f"Site: {row.site}")
+        print(f"Title: {row.title}")
+        print(f"URL: {row.url}")
+        print(f"Hash: {row.hash}")
+
+        if row.detail_content:
+            content = row.detail_content[:300] + "..." if len(row.detail_content) > 300 else row.detail_content
+            print(f"\nContent Preview:\n{content}")
+        
+        if row.ai_summary:
+            summary = row.ai_summary[:300] + "..." if len(row.ai_summary) > 300 else row.ai_summary
+            print(f"\nAI Summary:\n{summary}")
+        
+        if row.pdf_content:
+            print(f"\nPDF Size: {len(row.pdf_content):,} bytes")
+        
+        print('\n' + '-' * 100)
 
 SCRAPER_MAP = {
     "cdcfoundation": scrape_cdc_foundation,
@@ -141,34 +178,39 @@ def main():
                 if conn.execute(select(processed.c.hash).where(processed.c.hash == h)).first():
                     continue
 
+                pdf_content = None
                 detail_src = rfp.get("detail_source_url", "")
                 if detail_src.lower().endswith('.pdf'):
                     try:
-                        detail_len = len(rfp.get('detail_content', '') or '')
-                        logger.info(f"Calling Bedrock to summarize RFP “{rfp['title']}” ({detail_len} chars)")
-                        summary = summarize_rfp(rfp.get("detail_content") or "")
-                        logger.info(f"Received Bedrock summary ({len(summary)} chars) for “{rfp['title']}”")
-                        rfp["summary"] = summary
+                        response = requests.get(detail_src, timeout=15)
+                        response.raise_for_status()
+                        pdf_content = response.content
+                        logger.info(f'Retrieved PDF content ({len(pdf_content)} bytes) for "{rfp["title"]}"')
                     except Exception as e:
-                        logger.exception(f"Bedrock summarization failed for “{rfp['title']}”")
-                        rfp["summary"] = None
-                else:
-                    logger.info(f"Skipping Bedrock summarization for “{rfp['title']}” (no PDF detail)")
-                    rfp["summary"] = None
+                        logger.exception(f'Failed to fetch PDF for "{rfp["title"]}"')
 
-                vector_store.add_texts(
-                    [rfp['content']],
-                    metadatas=[{'url': rfp['url'], 'site': rfp['site']}]
-                )
+                ai_summary = None
+                if rfp.get('detail_content'):
+                    try:
+                        ai_summary = summarize_rfp(rfp['detail_content'])
+                        logger.info(f'Generated AI summary for "{rfp["title"]}"')
+                    except Exception as e:
+                        logger.exception(f'Failed to generate AI summary for "{rfp["title"]}"')
+
                 conn.execute(
                     processed.insert().values(
                         hash=h,
                         title=rfp["title"],
                         url=rfp["url"],
                         site=rfp["site"],
-                        processed_at=datetime.now(timezone.utc).isoformat()
+                        processed_at=datetime.now(timezone.utc).isoformat(),
+                        detail_content=rfp.get('detail_content'),
+                        ai_summary=ai_summary,
+                        pdf_content=pdf_content
                     )
                 )
+                
+                rfp['summary'] = ai_summary
                 new_rfps.append(rfp)
 
     engine.dispose()
@@ -189,6 +231,16 @@ def process_and_email(send_main: bool, send_debug: bool):
         send_email('SmartMatch: Debug Log', debug_body, to_debug)
 
     return new_rfps
+
+def get_pdf(hash: str):
+    with engine.connect() as conn:
+        result = conn.execute(
+            select(processed.c.pdf_content, processed.c.title)
+            .where(processed.c.hash == hash)
+        ).first()
+        
+        if result and result.pdf_content:
+            return result.pdf_content, result.title
 
 if __name__ == '__main__':
     import argparse
