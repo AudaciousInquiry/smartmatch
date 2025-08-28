@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { listRfps, triggerScrape, type RfpRow } from "./lib/api";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
+import { listRfps, triggerScrape, type RfpRow, updateSchedule, getSchedule } from "./lib/api";
 import { 
   RefreshIcon, 
   CalendarIcon, 
@@ -9,6 +10,9 @@ import {
   TrashIcon, 
   SortIcon 
 } from "../components/Icons";
+import { DetailView } from "../components/DetailView";
+import { getRfpDetail, downloadPdf, RfpDetailRow } from './lib/api';
+import { ScheduleCard } from "../components/ScheduleCard";
 
 function fmt(dt: string | null) {
   if (!dt) return "";
@@ -21,12 +25,18 @@ export default function Home() {
   const [rows, setRows] = useState<RfpRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [schedule, setSchedule] = useState<any | null>(null);
   const [scheduling, setScheduling] = useState(false);
   const [q, setQ] = useState("");  
   
   const [sortField, setSortField] = useState<keyof RfpRow>("processed_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [filterText, setFilterText] = useState("");
+  const [selectedRow, setSelectedRow] = useState<RfpDetailRow | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  
+  const scheduleRef = useRef<HTMLDivElement>(null);
   
   const load = async () => {
     setLoading(true);
@@ -42,6 +52,17 @@ export default function Home() {
     load();
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await getSchedule();
+        setSchedule(res.data);
+      } catch (e) {
+        console.error("Failed to load schedule", e);
+      }
+    })();
+  }, []);
+
   const onRunNow = async () => {
     setRunning(true);
     try {
@@ -53,12 +74,33 @@ export default function Home() {
     }
   };
 
-  const onScheduleRun = async () => {
+  const onScheduleRun = async (payload?: { hour: number; minute: number; frequency: number }) => {
+    if (!payload) {
+      setShowSchedule(!showSchedule);
+      return;
+    }
     setScheduling(true);
     try {
-      // Placeholder for schedule functionality
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call
-      alert('Mock API Call: Scrape and Email scheduled successfully!');
+      const body = {
+        enabled: true,
+        interval_hours: payload.frequency,
+        next_run_hour: payload.hour,
+        next_run_minute: payload.minute,
+      };
+      console.log("Sending schedule update", body);
+      const res = await updateSchedule(body);
+      console.log("Schedule update response", res);
+      const refreshed = await getSchedule();
+      setSchedule(refreshed.data);
+      setShowSchedule(false);
+      alert("Schedule updated successfully!");
+    } catch (error: any) {
+      console.error("Schedule update error:", {
+        message: error?.message,
+        status: error?.response?.status,
+        data: error?.response?.data,
+      });
+      alert("Failed to update schedule: " + (error?.response?.data?.detail ?? error?.message));
     } finally {
       setScheduling(false);
     }
@@ -124,6 +166,73 @@ export default function Home() {
     });
   }, [rows, filterText, sortField, sortDirection]);
 
+  const handleRowClick = async (hash: string) => {
+    setLoadingDetail(true);
+    try {
+      const res = await getRfpDetail(hash);
+      setSelectedRow(res.data);
+    } catch (error) {
+      alert('Failed to load details');
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!selectedRow) return;
+    
+    try {
+      const res = await downloadPdf(selectedRow.hash);
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${selectedRow.title}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      alert('Failed to download PDF');
+    }
+  };
+
+  const tableRows = useMemo(() => (
+    <tbody className="text-gray-200">
+      {filteredAndSortedRows.map((r, index) => (
+        <tr 
+          key={r.hash} 
+          onClick={() => handleRowClick(r.hash)}
+          className={`border-t border-gray-700/30 hover:bg-gray-700/30 transition-colors cursor-pointer ${
+            index % 2 === 0 ? 'bg-gray-800/20' : 'bg-gray-800/40'
+          }`}
+        >
+          <td className="p-4 whitespace-nowrap">
+            {fmt(r.processed_at)}
+          </td>
+          <td className="p-4 whitespace-nowrap">
+            {r.site}
+          </td>
+          <td className="p-4 whitespace-nowrap">
+            {r.title}
+          </td>
+          <td className="p-4 whitespace-nowrap">
+            <a 
+              href={r.url} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:underline"
+            >
+              {r.url}
+            </a>
+          </td>
+          <td className="p-4 whitespace-nowrap">
+            {r.hash}
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  ), [filteredAndSortedRows, handleRowClick]);
+
   const table = useMemo(
     () => (
       <div className="overflow-x-auto rounded-xl border border-gray-700/50 bg-gray-800/50 backdrop-blur-sm shadow-xl">
@@ -177,39 +286,30 @@ export default function Home() {
               </th>
             </tr>
           </thead>
-          <tbody className="text-gray-200">
-            {filteredAndSortedRows.map((r, index) => (
-              <tr key={r.hash} className={`border-t border-gray-700/30 hover:bg-gray-700/30 transition-colors ${index % 2 === 0 ? 'bg-gray-800/20' : 'bg-gray-800/40'}`}>
-                <td className="p-4 whitespace-nowrap text-gray-300">{fmt(r.processed_at)}</td>
-                <td className="p-4 text-blue-400 font-medium">{r.site}</td>
-                <td className="p-4">{r.title}</td>
-                <td className="p-4">
-                  <a href={r.url} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 underline decoration-blue-400/50 hover:decoration-blue-300 transition-colors">
-                    {r.url}
-                  </a>
-                </td>
-                <td className="p-4 font-mono text-xs text-gray-400 bg-gray-900/30 rounded">{r.hash.slice(0, 10)}…</td>
-              </tr>
-            ))}
-            {!filteredAndSortedRows.length && !loading && (
-              <tr>
-                <td className="p-8 text-center text-gray-400" colSpan={5}>
-                  {filterText.trim() ? `No results found for "${filterText}"` : "No rows found"}
-                </td>
-              </tr>
-            )}
-          </tbody>
+          {tableRows}
         </table>
       </div>
     ),
     [filteredAndSortedRows, loading]
   );
 
+  // Click outside handler for schedule
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (scheduleRef.current && !scheduleRef.current.contains(event.target as Node)) {
+        setShowSchedule(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6 space-y-8">
       <header className="flex items-center justify-between bg-gray-800/60 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 shadow-lg">
         <h1 className="text-3xl font-bold text-white">SmartMatch Admin Console</h1>
-        <div className="space-x-3">
+        <div className="flex items-center gap-3"> {/* Changed from space-x-3 to flex and gap-3 */}
           <button
             onClick={load}
             disabled={loading}
@@ -220,16 +320,31 @@ export default function Home() {
               {loading ? "Loading…" : "Refresh"}
             </span>
           </button>
-          <button
-            onClick={onScheduleRun}
-            disabled={scheduling}
-            className="rounded-lg bg-purple-600/80 text-white border border-purple-500/50 px-4 py-2 hover:bg-purple-500/90 hover:border-purple-400/70 active:bg-purple-700/90 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 backdrop-blur-sm shadow-md"
-          >
-            <span className="flex items-center gap-2">
-              <CalendarIcon />
-              {scheduling ? "Scheduling…" : "Schedule Run"}
-            </span>
-          </button>
+          <div className="relative inline-block"> {/* Added inline-block */}
+            <button
+              onClick={() => onScheduleRun()}
+              disabled={scheduling}
+              className="rounded-lg bg-purple-600/80 text-white border border-purple-500/50 px-4 py-2 hover:bg-purple-500/90 hover:border-purple-400/70 active:bg-purple-700/90 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 backdrop-blur-sm shadow-md"
+            >
+              <span className="flex items-center gap-2">
+                <CalendarIcon />
+                {scheduling ? "Scheduling…" : "Schedule Run"}
+              </span>
+            </button>
+            
+            {showSchedule && createPortal(
+              <div ref={scheduleRef} className="fixed top-20 right-6 z-[99999]">
+                <div className="bg-gray-800/95 rounded-xl border border-gray-700/50 shadow-xl">
+                  <ScheduleCard
+                    onClose={() => setShowSchedule(false)}
+                    onSubmit={onScheduleRun}
+                    schedule={schedule}
+                  />
+                </div>
+              </div>,
+              document.body
+            )}
+          </div>
           <button
             onClick={onRunNow}
             disabled={running}
@@ -243,40 +358,50 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="bg-gray-800/40 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 shadow-lg space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-semibold text-white mb-1">Find Opportunities</h2>
-            <p className="text-sm text-gray-400">Search and filter through current results</p>
+      {selectedRow ? (
+        <DetailView 
+          data={selectedRow}
+          onBack={() => setSelectedRow(null)}
+          onDownload={handleDownloadPdf}
+        />
+      ) : (
+        <>
+          <div className="bg-gray-800/40 rounded-xl p-6 border border-gray-700/50 shadow-lg space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-white mb-1">Find Opportunities</h2>
+                <p className="text-sm text-gray-400">Search and filter through current results</p>
+              </div>
+              <div className="flex items-center">
+                {filterText && (
+                  <button
+                    onClick={() => setFilterText("")}
+                    className="rounded-lg bg-gray-600/70 text-gray-200 border border-gray-500/50 px-3 py-3 hover:bg-red-600/60 hover:text-white hover:border-red-500/50 active:bg-red-700/70 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md flex items-center gap-2"
+                    title="Clear filter"
+                  >
+                    <TrashIcon />
+                    Clear Filter
+                  </button>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <input
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+                placeholder="Type to search..."
+                className="flex-1 max-w-md rounded-lg bg-gray-700/60 text-gray-200 placeholder-gray-400 border border-gray-600/50 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500/50 backdrop-blur-sm transition-all duration-200"
+              />
+              <div className="text-sm text-gray-400">
+                Displaying {filteredAndSortedRows.length} of {rows.length} opportunities
+              </div>
+            </div>
           </div>
-          <div className="flex items-center">
-            {filterText && (
-              <button
-                onClick={() => setFilterText("")}
-                className="rounded-lg bg-gray-600/70 text-gray-200 border border-gray-500/50 px-3 py-3 hover:bg-red-600/60 hover:text-white hover:border-red-500/50 active:bg-red-700/70 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md flex items-center gap-2"
-                title="Clear filter"
-              >
-                <TrashIcon />
-                Clear Filter
-              </button>
-            )}
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-3">
-          <input
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-            placeholder="Type to search..."
-            className="flex-1 max-w-md rounded-lg bg-gray-700/60 text-gray-200 placeholder-gray-400 border border-gray-600/50 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500/50 backdrop-blur-sm transition-all duration-200"
-          />
-          <div className="text-sm text-gray-400">
-            Displaying {filteredAndSortedRows.length} of {rows.length} opportunities
-          </div>
-        </div>
-      </div>
 
-      {table}
+          {table}
+        </>
+      )}
     </main>
   );
 }

@@ -250,10 +250,30 @@ if __name__ == '__main__':
     parser.add_argument('--debug-email', action='store_true')
     parser.add_argument('--list', action='store_true', help='List processed RFPs')
     parser.add_argument('--clear', action='store_true', help='Clear processed RFPs')
+    parser.add_argument('--clear-schedule', action='store_true', help='Clear scheduled run (reset scrape_config singleton)')
     args = parser.parse_args()
 
     engine = create_engine(ConfigurationValues.get_pgvector_connection())
     processed = init_processed_table(engine)
+
+    if args.clear_schedule:
+        logger.warning('Clearing schedule configuration (scrape_config.singleton)...')
+        with engine.begin() as conn:
+            res = conn.execute(text("""
+                UPDATE scrape_config
+                SET enabled = false,
+                    next_run_at = NULL,
+                    last_run_at = NULL,
+                    updated_at = NOW()
+                WHERE id = 'singleton'
+            """))
+            if res.rowcount == 0:
+                conn.execute(text("""
+                    INSERT INTO scrape_config (id, enabled, interval_hours, next_run_at, last_run_at, created_at, updated_at)
+                    VALUES ('singleton', false, 24.0, NULL, NULL, NOW(), NOW())
+                """))
+        print("Cleared schedule configuration")
+        sys.exit(0)
 
     if args.clear:
         clear_processed(engine)
