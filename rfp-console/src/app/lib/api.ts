@@ -15,6 +15,8 @@ export const updateSchedule = (data: {
   next_run_minute: number;
 }) => api.put("/schedule", data);
 
+export const clearSchedule = () => api.delete("/schedule");
+
 export const getEmailSettings = () => api.get("/email-settings");
 export const setEmailSettings = (data: { main_recipients: string[]; debug_recipients: string[] }) =>
   api.put("/email-settings", data);

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { listRfps, triggerScrape, type RfpRow, updateSchedule, getSchedule } from "./lib/api";
+import { listRfps, triggerScrape, type RfpRow, updateSchedule, getSchedule, clearSchedule } from "./lib/api";
 import { 
   RefreshIcon, 
   CalendarIcon, 
@@ -87,20 +87,29 @@ export default function Home() {
         next_run_hour: payload.hour,
         next_run_minute: payload.minute,
       };
-      console.log("Sending schedule update", body);
-      const res = await updateSchedule(body);
-      console.log("Schedule update response", res);
+      await updateSchedule(body);
       const refreshed = await getSchedule();
       setSchedule(refreshed.data);
       setShowSchedule(false);
       alert("Schedule updated successfully!");
     } catch (error: any) {
-      console.error("Schedule update error:", {
-        message: error?.message,
-        status: error?.response?.status,
-        data: error?.response?.data,
-      });
-      alert("Failed to update schedule: " + (error?.response?.data?.detail ?? error?.message));
+      const detail = error?.response?.data ?? error?.message ?? "Unknown error";
+      const msg = typeof detail === "string" ? detail : JSON.stringify(detail);
+      console.error("Schedule update error:", msg);
+      alert("Failed to update schedule: " + msg);
+    } finally {
+      setScheduling(false);
+    }
+  };
+
+  const onClearSchedule = async () => {
+    setScheduling(true);
+    try {
+      const res = await clearSchedule();
+      setSchedule(res.data); // shows "Not scheduled" in the card
+      // optionally close the card: setShowSchedule(false);
+    } catch (error: any) {
+      alert("Failed to clear schedule: " + (error?.response?.data?.detail ?? error?.message));
     } finally {
       setScheduling(false);
     }
@@ -338,6 +347,7 @@ export default function Home() {
                   <ScheduleCard
                     onClose={() => setShowSchedule(false)}
                     onSubmit={onScheduleRun}
+                    onClear={onClearSchedule}
                     schedule={schedule}
                   />
                 </div>

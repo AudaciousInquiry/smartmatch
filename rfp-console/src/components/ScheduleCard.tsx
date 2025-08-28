@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 interface ScheduleCardProps {
   onClose: () => void;
   onSubmit: (schedule: { hour: number; minute: number; frequency: number }) => Promise<void> | void;
+  onClear: () => Promise<void> | void; // NEW
   schedule?: {
     enabled?: boolean;
     interval_hours?: number;
@@ -10,7 +11,7 @@ interface ScheduleCardProps {
   };
 }
 
-export function ScheduleCard({ onClose, onSubmit, schedule }: ScheduleCardProps) {
+export function ScheduleCard({ onClose, onSubmit, onClear, schedule }: ScheduleCardProps) {
   const [hour, setHour] = useState<number>(() => {
     const d = schedule?.next_run_at ? new Date(schedule.next_run_at) : new Date();
     return d.getHours();
@@ -121,10 +122,17 @@ export function ScheduleCard({ onClose, onSubmit, schedule }: ScheduleCardProps)
         </select>
       </div>
 
-      <div className="flex justify-end pt-2">
+      <div className="flex items-center justify-between pt-2">
+        <button
+          onClick={() => onClear()}
+          className="rounded-lg px-3 py-2 text-sm bg-gray-700/70 text-gray-100 border border-gray-600/50 hover:bg-gray-600/70 transition-colors"
+          title="Disable scheduling and clear next run"
+        >
+          Clear schedule
+        </button>
         <button
           onClick={() => onSubmit({ hour, minute, frequency })}
-          className="rounded-lg bg-blue-600/80 text-white px-4 py-2"
+          className="rounded-lg bg-blue-600/80 text-white px-4 py-2 hover:bg-blue-500/90 transition-colors"
         >
           Apply Schedule
         </button>

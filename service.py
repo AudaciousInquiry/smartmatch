@@ -11,6 +11,8 @@ from typing import List, Optional
 from importlib import reload
 from contextlib import asynccontextmanager
 import asyncio
+import os
+from zoneinfo import ZoneInfo  # Py>=3.9
 
 from configuration_values import ConfigurationValues
 from email_utils import send_email
@@ -93,7 +95,7 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,6 +104,15 @@ app.add_middleware(
 init_db()
 
 metadata.create_all(engine)
+
+def get_sched_tz() -> datetime.tzinfo:
+    tz_name = os.getenv("SCHEDULE_TIMEZONE") or os.getenv("SCHED_TZ") or os.getenv("TZ")
+    if tz_name:
+        try:
+            return ZoneInfo(tz_name)
+        except Exception:
+            logger.warning(f"Invalid timezone '{tz_name}', falling back to system local tz")
+    return datetime.datetime.now().astimezone().tzinfo
 
 class ScheduleUpdate(BaseModel):
     enabled: bool
@@ -190,45 +201,50 @@ def get_schedule():
 def update_schedule(payload: ScheduleUpdate):
     try:
         logger.info(f"Received schedule update: {payload}")
+        sched_tz = get_sched_tz()
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_srv = now_utc.astimezone(sched_tz)
+
+        # Next occurrence in server-configured timezone (no interval added here)
+        candidate_srv = now_srv.replace(
+            hour=payload.next_run_hour,
+            minute=payload.next_run_minute,
+            second=0,
+            microsecond=0,
+        )
+        if candidate_srv <= now_srv:
+            candidate_srv += datetime.timedelta(days=1)
+
+        next_run_utc = candidate_srv.astimezone(datetime.timezone.utc)
+        logger.info(f"Server TZ: {sched_tz} | Now(srv): {now_srv} | Next(srv): {candidate_srv} | Store(UTC): {next_run_utc}")
+
         with engine.begin() as conn:
-            local_tz = datetime.datetime.now().astimezone().tzinfo
-            now_local = datetime.datetime.now(local_tz)
-            candidate_local = now_local.replace(
-                hour=payload.next_run_hour,
-                minute=payload.next_run_minute,
-                second=0,
-                microsecond=0
-            )
-            if candidate_local <= now_local:
-                candidate_local += datetime.timedelta(days=1)
-
-            next_run_utc = candidate_local.astimezone(datetime.timezone.utc)
-            logger.info(f"Local next occurrence: {candidate_local} | Stored as UTC: {next_run_utc}")
-
             conn.execute(
                 text("""
-                    UPDATE scrape_config 
-                    SET enabled = :enabled,
-                        interval_hours = :interval_hours,
-                        next_run_at = :next_run_at,
+                    INSERT INTO scrape_config (id, enabled, interval_hours, next_run_at, last_run_at, created_at, updated_at)
+                    VALUES ('singleton', :enabled, :interval_hours, :next_run_at, NULL, :now_utc, :now_utc)
+                    ON CONFLICT (id) DO UPDATE SET
+                        enabled = EXCLUDED.enabled,
+                        interval_hours = EXCLUDED.interval_hours,
+                        next_run_at = EXCLUDED.next_run_at,
                         last_run_at = NULL,
-                        updated_at = :updated_at
-                    WHERE id = 'singleton'
+                        updated_at = EXCLUDED.updated_at
                 """),
                 {
                     "enabled": payload.enabled,
                     "interval_hours": float(payload.interval_hours),
                     "next_run_at": next_run_utc,
-                    "updated_at": datetime.datetime.now(datetime.timezone.utc)
-                }
+                    "now_utc": now_utc,
+                },
             )
 
             row = conn.execute(text("SELECT enabled, interval_hours, next_run_at FROM scrape_config WHERE id = 'singleton'")).first()
-            m = row._mapping if row else {}
+            m = row._mapping
+            nr = m.get("next_run_at")
             return {
                 "enabled": bool(m.get("enabled")),
-                "interval_hours": float(m.get("interval_hours")) if m.get("interval_hours") is not None else None,
-                "next_run_at": m.get("next_run_at").isoformat() if m.get("next_run_at") else None
+                "interval_hours": float(m.get("interval_hours")),
+                "next_run_at": (nr.replace(tzinfo=datetime.timezone.utc).isoformat() if nr and nr.tzinfo is None else (nr.isoformat() if nr else None)),
             }
     except Exception as e:
         logger.exception("Failed to update schedule")
@@ -401,3 +417,43 @@ async def check_and_run_schedule():
             logger.exception("Error in scheduler loop")
 
         await asyncio.sleep(60)
+
+@app.delete("/schedule")
+def clear_schedule():
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    with engine.begin() as conn:
+        # ensure singleton exists
+        row = conn.execute(select(scrape_config).where(scrape_config.c.id == "singleton")).first()
+        if not row:
+            conn.execute(
+                insert(scrape_config).values(
+                    id="singleton",
+                    enabled=False,
+                    interval_hours=24.0,
+                    next_run_at=None,
+                    last_run_at=None,
+                    created_at=now_utc,
+                    updated_at=now_utc,
+                )
+            )
+        else:
+            conn.execute(
+                text("""
+                    UPDATE scrape_config
+                    SET enabled = false,
+                        next_run_at = NULL,
+                        last_run_at = NULL,
+                        updated_at = :updated_at
+                    WHERE id = 'singleton'
+                """),
+                {"updated_at": now_utc},
+            )
+
+        row2 = conn.execute(text("SELECT enabled, interval_hours, next_run_at, last_run_at FROM scrape_config WHERE id = 'singleton'")).first()
+        m = row2._mapping
+        return {
+            "enabled": bool(m.get("enabled")),
+            "interval_hours": float(m.get("interval_hours")) if m.get("interval_hours") is not None else None,
+            "next_run_at": m.get("next_run_at").isoformat() if m.get("next_run_at") else None,
+            "last_run_at": m.get("last_run_at").isoformat() if m.get("last_run_at") else None,
+        }
