@@ -16,6 +16,8 @@ DEFAULT_SPLITTER = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", " ", ""],
 )
 
+MAX_PDF_TEXT_CHARS = int(os.getenv("MAX_PDF_TEXT_CHARS", "400000"))
+
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -30,7 +32,11 @@ def extract_pdf_text(pdf_bytes, splitter=DEFAULT_SPLITTER) -> str:
     try:
         loader = PyPDFLoader(tmp_path)
         docs = loader.load_and_split(splitter)
-        return "\n\n".join(d.page_content for d in docs)
+        text = "\n\n".join(d.page_content for d in docs)
+        if len(text) > MAX_PDF_TEXT_CHARS:
+            logger.debug(f"Trimming PDF text from {len(text)} to {MAX_PDF_TEXT_CHARS} chars")
+            text = text[:MAX_PDF_TEXT_CHARS]
+        return text
     except Exception as e:
         logger.warning(f"PDF parsing failed: {e}")
         return ""
@@ -55,21 +61,21 @@ def _get(session: requests.Session | None, url: str, headers: dict, timeout: int
         return session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
     return requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
 
-def extract_detail_content(url: str, timeout: int = 15, session: requests.Session | None = None, referer: str | None = None) -> str:
+def extract_detail(url: str, timeout: int = 15, session: requests.Session | None = None, referer: str | None = None) -> tuple[str, str | None]:
     logger.info(f"Extracting detail content from {url}")
     try:
         resp = _get(session, url, _headers(referer), timeout)
         resp.raise_for_status()
     except Exception as e:
         logger.error(f"Failed to fetch detail URL {url}: {e}")
-        return ""
+        return "", None
 
     final_url = resp.url
     content_type = resp.headers.get("Content-Type", "").lower()
 
     if "application/pdf" in content_type or final_url.lower().endswith(".pdf"):
         logger.debug(f"Detected PDF at {final_url}")
-        return extract_pdf_text(resp.content)
+        return extract_pdf_text(resp.content), final_url
 
     soup = BeautifulSoup(resp.text, "html.parser")
 
@@ -80,7 +86,7 @@ def extract_detail_content(url: str, timeout: int = 15, session: requests.Sessio
         try:
             pdf_resp = _get(session, pdf_url, _headers(referer or final_url, accept="application/pdf,*/*;q=0.9"), timeout)
             pdf_resp.raise_for_status()
-            return extract_pdf_text(pdf_resp.content)
+            return extract_pdf_text(pdf_resp.content), pdf_url
         except Exception as e:
             logger.warning(f"Failed to fetch linked PDF {pdf_url}: {e}")
 
@@ -91,10 +97,14 @@ def extract_detail_content(url: str, timeout: int = 15, session: requests.Sessio
         try:
             pdf_resp = _get(session, embedded_pdf_url, _headers(referer or final_url, accept="application/pdf,*/*;q=0.9"), timeout)
             pdf_resp.raise_for_status()
-            return extract_pdf_text(pdf_resp.content)
+            return extract_pdf_text(pdf_resp.content), embedded_pdf_url
         except Exception as e:
             logger.warning(f"Failed to fetch embedded PDF {embedded_pdf_url}: {e}")
 
     visible_text = soup.get_text(separator="\n", strip=True)
     logger.debug(f"Falling back to HTML text extraction for {final_url}")
-    return visible_text or ""
+    return (visible_text or ""), None
+
+def extract_detail_content(url: str, timeout: int = 15, session: requests.Session | None = None, referer: str | None = None) -> str:
+    text, _ = extract_detail(url, timeout=timeout, session=session, referer=referer)
+    return text

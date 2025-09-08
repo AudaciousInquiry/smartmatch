@@ -7,10 +7,12 @@ def summarize_rfp(rfp_text: str) -> str:
     if not api_key:
         raise RuntimeError("Set your Bedrock API key in AWS_BEARER_TOKEN_BEDROCK")
 
-    url = (
-        "https://bedrock-runtime.us-east-1.amazonaws.com/"
-        "model/us.anthropic.claude-3-7-sonnet-20250219-v1:0/invoke"
-    )
+    region = os.getenv("BEDROCK_REGION", "us-east-1").strip()
+    model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0").strip()
+    url = os.getenv(
+        "BEDROCK_ENDPOINT",
+        f"https://bedrock-runtime.{region}.amazonaws.com/model/{model_id}/invoke",
+    ).strip()
     payload = {
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 1000,
@@ -19,7 +21,8 @@ def summarize_rfp(rfp_text: str) -> str:
         ],
     }
 
-    logger.debug(f"BEDROCK REQUEST PAYLOAD:\n{payload!r}")
+    logger.info(f"Using Bedrock model={model_id} region={region}")
+    logger.debug(f"BEDROCK REQUEST PAYLOAD size: messages.user.len={len(rfp_text)} max_tokens=1000")
     resp = requests.post(
         url,
         headers={
