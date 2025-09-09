@@ -19,11 +19,7 @@ from sqlalchemy import create_engine, Table, Column, String, MetaData, select, t
 from sqlalchemy import LargeBinary
 import requests
 
-from cdc_foundation import scrape_cdc_foundation
-from nnphi import scrape_nnphi
-from astho import scrape_astho
-from cste import scrape_cste
-from aira import scrape_aira
+from bedrock_scrape import process_listing
 
 from email_utils import send_email
 from bedrock_utils import summarize_rfp
@@ -124,13 +120,7 @@ def list_processed(engine, processed):
         
         print('\n' + '-' * 100)
 
-SCRAPER_MAP = {
-    "cdcfoundation": scrape_cdc_foundation,
-    "cste": scrape_cste,
-    "nnphi": scrape_nnphi,
-    "astho": scrape_astho,
-    "aira": scrape_aira,
-}
+SCRAPER_MAP = {}
 
 def format_new_rfps(new_rfps):
     if not new_rfps:
@@ -169,49 +159,20 @@ def main():
     new_rfps = []
     with engine.begin() as conn:
         for site in ConfigurationValues.get_websites():
-            scraper = SCRAPER_MAP.get(site['name'])
-            if not scraper:
-                continue
-
-            for rfp in scraper(site):
-                h = hashlib.sha256((rfp["title"] + rfp["url"]).encode()).hexdigest()
-                if conn.execute(select(processed.c.hash).where(processed.c.hash == h)).first():
-                    continue
-
-                pdf_content = None
-                detail_src = rfp.get("detail_source_url", "")
-                if detail_src.lower().endswith('.pdf'):
-                    try:
-                        response = requests.get(detail_src, timeout=15)
-                        response.raise_for_status()
-                        pdf_content = response.content
-                        logger.info(f'Retrieved PDF content ({len(pdf_content)} bytes) for "{rfp["title"]}"')
-                    except Exception as e:
-                        logger.exception(f'Failed to fetch PDF for "{rfp["title"]}"')
-
-                ai_summary = None
-                if rfp.get('detail_content'):
-                    try:
-                        ai_summary = summarize_rfp(rfp['detail_content'])
-                        logger.info(f'Generated AI summary for "{rfp["title"]}"')
-                    except Exception as e:
-                        logger.exception(f'Failed to generate AI summary for "{rfp["title"]}"')
-
-                conn.execute(
-                    processed.insert().values(
-                        hash=h,
-                        title=rfp["title"],
-                        url=rfp["url"],
-                        site=rfp["site"],
-                        processed_at=datetime.now(timezone.utc).isoformat(),
-                        detail_content=rfp.get('detail_content'),
-                        ai_summary=ai_summary,
-                        pdf_content=pdf_content
-                    )
-                )
-                
-                rfp['summary'] = ai_summary
-                new_rfps.append(rfp)
+            site_name = site['name']
+            url = site['url']
+            logger.info(f"Processing listing via Bedrock probe: {site_name} -> {url}")
+            rows = process_listing(url, site_name=site_name, engine=engine)
+            for r in rows:
+                new_rfps.append({
+                    'title': r['title'],
+                    'url': r['url'],
+                    'site': site_name,
+                    'detail_source_url': r.get('detail_source_url'),
+                    'detail_content': None,
+                    'ai_summary': r.get('ai_summary'),
+                    'summary': r.get('ai_summary'),
+                })
 
     engine.dispose()
     return new_rfps
