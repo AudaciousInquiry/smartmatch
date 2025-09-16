@@ -211,7 +211,6 @@ def is_generic_title(t: Optional[str]) -> bool:
     return False
 
 def init_processed_table(engine):
-    """Create processed_rfps table (idempotent). Duplicated locally to avoid circular import with main."""
     metadata = MetaData(schema='public')
     processed = Table(
         'processed_rfps', metadata,
@@ -318,15 +317,19 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
                 chosen_title = final_title.strip()
 
             pdf_bytes = None
-            if is_pdf(final_url):
-                try:
+            try:
+                parsed_text, detected_pdf_url = extract_detail(final_url, referer=page_url)
+                if detected_pdf_url:
                     headers = dict(UA_BASE)
                     headers["Referer"] = url
-                    rpdf = requests.get(final_url, headers=headers, timeout=30, allow_redirects=True)
-                    if rpdf.status_code == 200 and rpdf.content:
+                    rpdf = requests.get(detected_pdf_url, headers=headers, timeout=30, allow_redirects=True)
+                    if rpdf.status_code == 200 and rpdf.content and (rpdf.headers.get('Content-Type','').lower().find('application/pdf') != -1 or rpdf.content[:5] == b"%PDF-"):
                         pdf_bytes = rpdf.content
-                except Exception:
-                    logger.exception(f"Failed to download final PDF {final_url}")
+                    if parsed_text:
+                        final_text = parsed_text
+                        final_url = detected_pdf_url
+            except Exception:
+                logger.exception(f"Failed robust PDF confirm/fetch for {final_url}")
 
             detail_content = (final_text or "")[:MAX_DETAIL_TEXT_CHARS]
             ai_summary = None
@@ -417,6 +420,14 @@ def navigate_to_final(start_url: str, existing: List[Dict[str,str]], max_hops: i
             fin = decision.get('final') or {}
             fu = (fin.get('url') or current_url).strip()
             final_title = (fin.get('title') or '').strip() or final_title or '(untitled RFP)'
+            try:
+                text, pdf_url = extract_detail(fu, referer=current_url)
+                if text and pdf_url:
+                    return pdf_url, final_title, text
+                if text:
+                    return fu, final_title, text
+            except Exception:
+                logger.exception(f"Failed to extract declared final URL {fu}")
             if is_pdf(fu):
                 try:
                     text, pdf_url = extract_detail(fu, referer=current_url)

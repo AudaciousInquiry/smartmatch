@@ -72,11 +72,19 @@ def extract_detail(url: str, timeout: int = 15, session: requests.Session | None
 
     final_url = resp.url
     content_type = resp.headers.get("Content-Type", "").lower()
+    dispo = resp.headers.get("Content-Disposition", "")
 
-    if "application/pdf" in content_type or final_url.lower().endswith(".pdf"):
-        logger.debug(f"Detected PDF at {final_url}")
+    # Robust PDF detection: content-type, file extension, Content-Disposition, or file signature
+    is_pdf_type = "application/pdf" in content_type
+    is_pdf_ext = final_url.lower().split("?")[0].endswith(".pdf")
+    is_pdf_dispo = ".pdf" in dispo.lower()
+    is_pdf_magic = resp.content[:5] == b"%PDF-"
+
+    if is_pdf_type or is_pdf_ext or is_pdf_dispo or is_pdf_magic:
+        logger.debug(f"Detected PDF at {final_url} (type={is_pdf_type}, ext={is_pdf_ext}, dispo={is_pdf_dispo}, magic={is_pdf_magic})")
         return extract_pdf_text(resp.content), final_url
 
+    # Treat as HTML; avoid decoding binary as text by ensuring it's not a PDF first (handled above)
     soup = BeautifulSoup(resp.text, "html.parser")
 
     pdf_link = soup.find("a", href=re.compile(r"\.pdf($|\?)", re.I))
@@ -86,7 +94,11 @@ def extract_detail(url: str, timeout: int = 15, session: requests.Session | None
         try:
             pdf_resp = _get(session, pdf_url, _headers(referer or final_url, accept="application/pdf,*/*;q=0.9"), timeout)
             pdf_resp.raise_for_status()
-            return extract_pdf_text(pdf_resp.content), pdf_url
+            # Validate it's a PDF even if server uses octet-stream
+            if (pdf_resp.headers.get("Content-Type", "").lower().find("application/pdf") != -1) or pdf_resp.content[:5] == b"%PDF-":
+                return extract_pdf_text(pdf_resp.content), pdf_url
+            else:
+                logger.warning(f"Linked file did not appear to be PDF by type/magic: {pdf_url} (type={pdf_resp.headers.get('Content-Type')})")
         except Exception as e:
             logger.warning(f"Failed to fetch linked PDF {pdf_url}: {e}")
 
@@ -97,7 +109,10 @@ def extract_detail(url: str, timeout: int = 15, session: requests.Session | None
         try:
             pdf_resp = _get(session, embedded_pdf_url, _headers(referer or final_url, accept="application/pdf,*/*;q=0.9"), timeout)
             pdf_resp.raise_for_status()
-            return extract_pdf_text(pdf_resp.content), embedded_pdf_url
+            if (pdf_resp.headers.get("Content-Type", "").lower().find("application/pdf") != -1) or pdf_resp.content[:5] == b"%PDF-":
+                return extract_pdf_text(pdf_resp.content), embedded_pdf_url
+            else:
+                logger.warning(f"Embedded file did not appear to be PDF by type/magic: {embedded_pdf_url} (type={pdf_resp.headers.get('Content-Type')})")
         except Exception as e:
             logger.warning(f"Failed to fetch embedded PDF {embedded_pdf_url}: {e}")
 

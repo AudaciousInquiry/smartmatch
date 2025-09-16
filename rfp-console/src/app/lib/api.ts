@@ -30,6 +30,9 @@ export const getRfpDetail = (hash: string) =>
 export const downloadPdf = (hash: string) =>
   api.get(`/rfps/${hash}/pdf`, { responseType: 'blob' });
 
+export const deleteRfp = (hash: string) =>
+  api.delete(`/rfps/${hash}`);
+
 export type RfpRow = {
   hash: string;
   title: string;

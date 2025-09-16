@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, EmailStr
 import datetime
 from sqlalchemy import (
     create_engine, Table, Column, String, Integer, Boolean,
-    DateTime, JSON, MetaData, select, update, insert, text,
+    DateTime, JSON, MetaData, select, update, insert, delete, text,
     LargeBinary, Float
 )
 from typing import List, Optional
@@ -321,6 +321,25 @@ def get_rfp_detail(hash: str):
             "ai_summary": row_dict.get("ai_summary"),
             "has_pdf": row_dict.get("pdf_content") is not None
         }
+
+@app.delete("/rfps/{hash}")
+def delete_rfp(hash: str):
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(
+                select(processed_rfps.c.hash).where(processed_rfps.c.hash == hash)
+            ).first()
+            if not row:
+                raise HTTPException(status_code=404, detail="RFP not found")
+            conn.execute(
+                delete(processed_rfps).where(processed_rfps.c.hash == hash)
+            )
+        return {"deleted": True, "hash": hash}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete RFP")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/rfps/{hash}/pdf")
 def get_rfp_pdf(hash: str):

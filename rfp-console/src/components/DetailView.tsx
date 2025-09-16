@@ -1,4 +1,6 @@
 import { BackIcon, DownloadIcon } from './Icons';
+import { deleteRfp } from '../app/lib/api';
+import { useState } from 'react';
 import { RfpDetailRow } from '../app/lib/api';
 
 interface DetailViewProps {
@@ -8,14 +10,31 @@ interface DetailViewProps {
 }
 
 export function DetailView({ data, onBack, onDownload }: DetailViewProps) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const formattedDate = data.processed_at 
     ? new Date(data.processed_at).toLocaleString() 
     : 'Unknown date';
 
+  const onDelete = async () => {
+    setError(null);
+    const ok = window.confirm('Delete this RFP? This action cannot be undone.');
+    if (!ok) return;
+    try {
+      setDeleting(true);
+      await deleteRfp(data.hash);
+      onBack();
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to delete');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between z-[1000]"> {/* Buttons above cards but below schedule */}
-        <div className="flex items-center gap-3">
+  <div className="flex items-center gap-3">
           <button
             onClick={onBack}
             className="rounded-lg bg-gray-600/70 text-gray-200 border border-gray-500/50 px-3 py-3 hover:bg-gray-500/60 hover:text-white hover:border-gray-400/50 active:bg-gray-700/70 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md flex items-center gap-2"
@@ -33,6 +52,15 @@ export function DetailView({ data, onBack, onDownload }: DetailViewProps) {
               Download PDF
             </button>
           )}
+
+          <button
+            onClick={onDelete}
+            disabled={deleting}
+            className="rounded-lg bg-red-600/70 text-gray-200 border border-red-500/50 px-3 py-3 hover:bg-red-500/60 hover:text-white hover:border-red-400/50 active:bg-red-700/70 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md flex items-center gap-2 disabled:opacity-60"
+            title="Delete this RFP"
+          >
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
         </div>
       </div>
 
@@ -62,6 +90,12 @@ export function DetailView({ data, onBack, onDownload }: DetailViewProps) {
           </div>
         </div>
       </div>
+
+      {error && (
+        <div className="bg-red-900/60 rounded-xl p-4 border border-red-700/50 text-red-100">
+          {error}
+        </div>
+      )}
 
       {data.ai_summary && (
         <div className="bg-gray-800/95 rounded-xl p-6 border border-gray-700/50 shadow-lg z-[1]">
