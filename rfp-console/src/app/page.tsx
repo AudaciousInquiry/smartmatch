@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { listRfps, triggerScrape, type RfpRow, updateSchedule, getSchedule, clearSchedule } from "./lib/api";
+import { listRfps, triggerScrape, type RfpRow, updateSchedule, getSchedule, clearSchedule, getEmailSettings, setEmailSettings } from "./lib/api";
 import { 
   RefreshIcon, 
   CalendarIcon, 
@@ -13,6 +13,7 @@ import {
 import { DetailView } from "../components/DetailView";
 import { getRfpDetail, downloadPdf, RfpDetailRow } from './lib/api';
 import { ScheduleCard } from "../components/ScheduleCard";
+import { MailingListCard } from "../components/MailingListCard";
 
 function fmt(dt: string | null) {
   if (!dt) return "";
@@ -28,6 +29,8 @@ export default function Home() {
   const [showSchedule, setShowSchedule] = useState(false);
   const [schedule, setSchedule] = useState<any | null>(null);
   const [scheduling, setScheduling] = useState(false);
+  const [showMailing, setShowMailing] = useState(false);
+  const [mailing, setMailing] = useState<{ main_recipients: string[]; debug_recipients: string[] } | null>(null);
   const [q, setQ] = useState("");  
   
   const [sortField, setSortField] = useState<keyof RfpRow>("processed_at");
@@ -37,6 +40,7 @@ export default function Home() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   
   const scheduleRef = useRef<HTMLDivElement>(null);
+  const mailingRef = useRef<HTMLDivElement>(null);
   
   const load = async () => {
     setLoading(true);
@@ -59,6 +63,12 @@ export default function Home() {
         setSchedule(res.data);
       } catch (e) {
         console.error("Failed to load schedule", e);
+      }
+      try {
+        const m = await getEmailSettings();
+        setMailing(m.data);
+      } catch (e) {
+        console.error("Failed to load email settings", e);
       }
     })();
   }, []);
@@ -106,8 +116,7 @@ export default function Home() {
     setScheduling(true);
     try {
       const res = await clearSchedule();
-      setSchedule(res.data); // shows "Not scheduled" in the card
-      // optionally close the card: setShowSchedule(false);
+      setSchedule(res.data);
     } catch (error: any) {
       alert("Failed to clear schedule: " + (error?.response?.data?.detail ?? error?.message));
     } finally {
@@ -117,10 +126,8 @@ export default function Home() {
 
   const handleSort = (field: keyof RfpRow) => {
     if (field === sortField) {
-      // Toggle direction if same field
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
     } else {
-      // New field, default to descending for dates, ascending for text
       setSortField(field);
       setSortDirection(field === "processed_at" ? "desc" : "asc");
     }
@@ -302,11 +309,13 @@ export default function Home() {
     [filteredAndSortedRows, loading]
   );
 
-  // Click outside handler for schedule
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (scheduleRef.current && !scheduleRef.current.contains(event.target as Node)) {
         setShowSchedule(false);
+      }
+      if (mailingRef.current && !mailingRef.current.contains(event.target as Node)) {
+        setShowMailing(false);
       }
     }
 
@@ -351,6 +360,35 @@ export default function Home() {
                     schedule={schedule}
                   />
                 </div>
+              </div>,
+              document.body
+            )}
+          </div>
+          <div className="relative inline-block">
+            <button
+              onClick={async () => {
+                try {
+                  const m = await getEmailSettings();
+                  setMailing(m.data);
+                  setShowMailing(true);
+                } catch (e) {
+                  alert("Failed to load mailing lists");
+                }
+              }}
+              className="rounded-lg bg-teal-600/80 text-white border border-teal-500/50 px-4 py-2 hover:bg-teal-500/90 hover:border-teal-400/70 active:bg-teal-700/90 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md"
+            >
+              Mailing Lists
+            </button>
+            {showMailing && mailing && createPortal(
+              <div ref={mailingRef} className="fixed top-20 right-6 z-[99999]">
+                <MailingListCard
+                  initial={mailing}
+                  onClose={() => setShowMailing(false)}
+                  onSave={async (settings) => {
+                    await setEmailSettings(settings);
+                    setMailing(settings);
+                  }}
+                />
               </div>,
               document.body
             )}

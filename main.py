@@ -182,14 +182,52 @@ def process_and_email(send_main: bool, send_debug: bool):
     main_body = format_email_body(new_rfps)
     full_log_text = LOG_BUFFER.getvalue()
 
+    def _parse_env_list(key: str) -> list[str]:
+        raw = os.environ.get(key, "")
+        return [e.strip() for e in raw.split(',') if e and e.strip()]
+
+    def _get_db_recipients() -> tuple[list[str], list[str]]:
+        try:
+            eng = create_engine(ConfigurationValues.get_pgvector_connection())
+            with eng.connect() as conn:
+                row = conn.execute(
+                    text("""
+                        SELECT main_recipients, debug_recipients
+                        FROM public.email_settings
+                        WHERE id = 'singleton'
+                    """)
+                ).first()
+            eng.dispose()
+            if not row:
+                return [], []
+            m = getattr(row, "_mapping", row)
+            main_lst = list(m.get("main_recipients") or [])
+            debug_lst = list(m.get("debug_recipients") or [])
+            main_norm = [str(x).strip() for x in main_lst if str(x).strip()]
+            debug_norm = [str(x).strip() for x in debug_lst if str(x).strip()]
+            return main_norm, debug_norm
+        except Exception:
+            logger.exception("Failed to load email recipients from DB; falling back to environment variables")
+            return [], []
+
+    db_main, db_debug = _get_db_recipients()
+
     if send_main and new_rfps:
-        to_main = os.environ['MAIN_RECIPIENTS'].split(',')
-        send_email('SmartMatch: New RFPs Found', main_body, to_main)
+        to_main = db_main or _parse_env_list('MAIN_RECIPIENTS')
+        if to_main:
+            logger.info(f"Sending main email to: {to_main} (source={'db' if db_main else 'env'})")
+            send_email('SmartMatch: New RFPs Found', main_body, to_main)
+        else:
+            logger.warning("No main recipients configured (db/env); skipping main email")
 
     if send_debug:
         debug_body = f"{main_body}\n\n--- FULL LOG ---\n{full_log_text}"
-        to_debug = os.environ['DEBUG_RECIPIENTS'].split(',')
-        send_email('SmartMatch: Debug Log', debug_body, to_debug)
+        to_debug = db_debug or _parse_env_list('DEBUG_RECIPIENTS')
+        if to_debug:
+            logger.info(f"Sending debug email to: {to_debug} (source={'db' if db_debug else 'env'})")
+            send_email('SmartMatch: Debug Log', debug_body, to_debug)
+        else:
+            logger.info("No debug recipients configured (db/env); skipping debug email")
 
     return new_rfps
 

@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime, JSON, MetaData, select, update, insert, delete, text,
     LargeBinary, Float
 )
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from typing import List, Optional
 from importlib import reload
 from contextlib import asynccontextmanager
@@ -261,21 +262,41 @@ def get_email_settings():
 
 @app.put("/email-settings")
 def set_email_settings(payload: EmailSettingsUpdate):
-    with engine.begin() as conn:
-        conn.execute(
-            update(email_settings)
-            .where(email_settings.c.id == "singleton")
-            .values(
-                main_recipients=payload.main_recipients,
-                debug_recipients=payload.debug_recipients,
-                updated_at=datetime.datetime.utcnow(),
+    try:
+        now = datetime.datetime.utcnow()
+        with engine.begin() as conn:
+            # Proper PostgreSQL upsert preserving JSON types
+            stmt = (
+                pg_insert(email_settings)
+                .values(
+                    id="singleton",
+                    main_recipients=payload.main_recipients,
+                    debug_recipients=payload.debug_recipients,
+                    created_at=now,
+                    updated_at=now,
+                )
+                .on_conflict_do_update(
+                    index_elements=[email_settings.c.id],
+                    set_={
+                        "main_recipients": payload.main_recipients,
+                        "debug_recipients": payload.debug_recipients,
+                        "updated_at": now,
+                    },
+                )
             )
-        )
-        row = conn.execute(select(email_settings).where(email_settings.c.id == "singleton")).first()
-        return {
-            "main_recipients": row.main_recipients,
-            "debug_recipients": row.debug_recipients,
-        }
+            conn.execute(stmt)
+            row = conn.execute(select(email_settings).where(email_settings.c.id == "singleton")).first()
+            if not row:
+                raise HTTPException(status_code=500, detail="Failed to persist email settings")
+            return {
+                "main_recipients": row.main_recipients,
+                "debug_recipients": row.debug_recipients,
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to save email settings")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/scrape")
 def trigger_scrape(send_main: Optional[bool] = True, send_debug: Optional[bool] = True):
