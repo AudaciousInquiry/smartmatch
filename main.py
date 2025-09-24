@@ -19,7 +19,7 @@ from sqlalchemy import create_engine, Table, Column, String, MetaData, select, t
 from sqlalchemy import LargeBinary
 import requests
 
-from bedrock_scrape import process_listing
+from bedrock_scrape import process_listing, init_exclusions_table
 
 from email_utils import send_email
 from bedrock_utils import summarize_rfp
@@ -120,6 +120,36 @@ def list_processed(engine, processed):
         
         print('\n' + '-' * 100)
 
+def list_exclusions(engine):
+    excluded = init_exclusions_table(engine)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(excluded).order_by(excluded.c.decided_at.desc())
+        ).fetchall()
+
+    print('\nExcluded RFPs:')
+    if not rows:
+        print('(none)')
+        return
+    for row in rows:
+        print('=' * 100)
+        print(f"Decided At: {row.decided_at}")
+        print(f"Site: {row.site}")
+        print(f"Reason: {row.reason}")
+        print(f"Title: {row.title}")
+        print(f"Listing URL: {row.listing_url}")
+        if row.detail_url:
+            print(f"Detail URL: {row.detail_url}")
+        print(f"Hash: {row.hash}")
+        print('\n' + '-' * 100)
+
+def clear_exclusions(engine):
+    excluded = init_exclusions_table(engine)
+    logger.warning('Clearing all excluded RFP records...')
+    with engine.begin() as conn:
+        # Ensure table exists then truncate
+        conn.execute(text('TRUNCATE TABLE public.rfp_exclusions'))
+
 SCRAPER_MAP = {}
 
 def format_new_rfps(new_rfps):
@@ -162,7 +192,11 @@ def main():
             site_name = site['name']
             url = site['url']
             logger.info(f"Processing listing via Bedrock probe: {site_name} -> {url}")
-            rows = process_listing(url, site_name=site_name, engine=engine)
+            try:
+                rows = process_listing(url, site_name=site_name, engine=engine)
+            except Exception as e:
+                logger.exception(f"Site processing failed; continuing: {site_name} ({url})")
+                rows = []
             for r in rows:
                 new_rfps.append({
                     'title': r['title'],
@@ -248,6 +282,8 @@ if __name__ == '__main__':
     parser.add_argument('--email', action='store_true')
     parser.add_argument('--debug-email', action='store_true')
     parser.add_argument('--list', action='store_true', help='List processed RFPs')
+    parser.add_argument('--list-exclusions', action='store_true', help='List excluded (expired/out-of-scope/etc.) RFPs')
+    parser.add_argument('--clear-exclusions', action='store_true', help='Clear exclusions list')
     parser.add_argument('--clear', action='store_true', help='Clear processed RFPs')
     parser.add_argument('--clear-schedule', action='store_true', help='Clear scheduled run (reset scrape_config singleton)')
     args = parser.parse_args()
@@ -281,6 +317,15 @@ if __name__ == '__main__':
 
     if args.list:
         list_processed(engine, processed)
+        sys.exit(0)
+
+    if args.list_exclusions:
+        list_exclusions(engine)
+        sys.exit(0)
+
+    if args.clear_exclusions:
+        clear_exclusions(engine)
+        print("Cleared rfp_exclusions")
         sys.exit(0)
 
     if args.email or args.debug_email:

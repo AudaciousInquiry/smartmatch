@@ -33,7 +33,7 @@ export function DetailView({ data, onBack, onDownload }: DetailViewProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between z-[1000]"> {/* Buttons above cards but below schedule */}
+      <div className="flex items-center justify-between z-[1000]"> {}
   <div className="flex items-center gap-3">
           <button
             onClick={onBack}

@@ -17,22 +17,25 @@ DEFAULT_ENDPOINT = os.getenv("BEDROCK_ENDPOINT", f"https://bedrock-runtime.{DEFA
 MAX_DETAIL_TEXT_CHARS = int(os.getenv("MAX_DETAIL_TEXT_CHARS", "400000"))
 
 def build_bedrock_endpoint(model_id: str, region: str) -> str:
+    # Construct the Bedrock invoke endpoint URL for a given model/region.
     return f"https://bedrock-runtime.{region}.amazonaws.com/model/{model_id}/invoke"
 
-def _post_with_retries(url: str, headers: Dict[str, str], payload: Dict[str, Any], timeout: tuple[float,float], retries: int) -> requests.Response:
+def _post_with_retries(url: str, headers: Dict[str, str], payload: Dict[str, Any], timeout: tuple[float, float], retries: int) -> requests.Response:
+    # POST with exponential backoff and jitter; retries on 429/5xx or exceptions.
     attempt = 0
     last_exc: Optional[Exception] = None
     while attempt <= retries:
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            # Retry on throttling or server errors
             if resp.status_code in (429,) or resp.status_code >= 500:
-                raise requests.HTTPError(f"HTTP {resp.status_code}", response=resp)
+                raise RuntimeError(f"Bedrock HTTP {resp.status_code}")
             return resp
-        except (ReadTimeout, ConnectTimeout, requests.ConnectionError, requests.HTTPError) as e:
+        except Exception as e:
             last_exc = e
-            if attempt == retries:
+            if attempt >= retries:
                 break
-            backoff = min(2 ** attempt, 10) + random.uniform(0, 0.5)
+            backoff = min(2 ** attempt, 8) + random.random()
             logger.warning(f"Bedrock request failed (attempt {attempt+1}/{retries+1}): {e}; retrying in {backoff:.1f}s")
             time.sleep(backoff)
             attempt += 1
@@ -40,6 +43,7 @@ def _post_with_retries(url: str, headers: Dict[str, str], payload: Dict[str, Any
     raise last_exc
 
 def call_bedrock(prompt: str, *, max_tokens: int = 8000, timeout_read: float = 60.0, timeout_connect: float = 10.0, retries: int = 2, log_raw: bool = False, log_raw_chars: int = 2000, system: Optional[str] = None, temperature: Optional[float] = 0.0, bedrock_url: Optional[str] = None) -> str:
+    # Invoke Bedrock Claude and return the raw text portion of the response.
     api_key = os.getenv("AWS_BEARER_TOKEN_BEDROCK")
     if not api_key:
         raise RuntimeError("Set AWS_BEARER_TOKEN_BEDROCK")
@@ -82,6 +86,8 @@ def call_bedrock(prompt: str, *, max_tokens: int = 8000, timeout_read: float = 6
     return data.get("content", [{}])[0].get("text", "")
 
 def extract_json(text_out: str) -> Dict[str, Any]:
+    # Parse JSON from an LLM response
+    # Raises ValueError if no reasonable JSON can be parsed.
     s = text_out.strip()
     if s.startswith("```"):
         s = "\n".join(s.splitlines()[1:])
@@ -197,6 +203,10 @@ SCRAPE_SYSTEM_PROMPT = (
     "- or have a nearest heading matching the item title, "
     "- or are is_pdf=true and clearly about the item, "
     "and avoid links where is_generic_listing=true. "
+    "Scope filter: ONLY include items that are clearly Healthcare IT / public health informatics / health data systems. "
+    "Examples to INCLUDE: data modernization, surveillance systems, registries, LIMS, HIE, EHR/EMR, HL7/FHIR, interoperability, data platforms/warehouses (Snowflake/Azure/AWS/GCP), ETL/ELT, APIs/integration, dashboards/BI/analytics, cloud engineering, cybersecurity for health data. "
+    "Examples to EXCLUDE: construction/facilities, architectural, legal, HR/staffing jobs, direct clinical services, supplies/equipment, travel, printing, events, general marketing/comms, non-IT training not about data systems. "
+    "If topic is ambiguous or not enough information is shown on this page, OMIT it at the listing stage. "
     "Return strict JSON only, no comments or markdown. IMPORTANT: Only include an item if the date you rely on is clearly a submission / application / proposal deadline (NOT a posted/published/announcement date). If the only visible date is a posted/publish date and there is no explicit deadline language (e.g., Due/Deadline/Closing), omit the item. Your answer will be evaluated primarily by whether detail_link_index correctly references a link in \"Top links\" that provides specific details for the item."
 )
 
@@ -206,6 +216,12 @@ You are given:
 2) A list of anchor links (text + href).
 3) A list of existing items already in the database (title + url).
  4) Today's date (YYYY-MM-DD): {today}
+
+Scope:
+- ONLY include items clearly related to Healthcare IT / public health informatics / health data systems.
+- Include: data modernization, certification, registries, LIMS, HIE, EHR/EMR, HL7/FHIR, interoperability, APIs, data platforms/warehouses, ETL/ELT, dashboards/BI/analytics, cloud engineering, cybersecurity for health data.
+- Exclude: construction/facilities, architectural, legal, HR/staffing jobs, direct clinical services, supplies/equipment, travel, printing, events, general marketing/comms, non-IT training.
+- If uncertain or ambiguous from this page, omit; a later navigation step cannot fix topic mismatch.
 
 Task:
 - Identify any new RFP/Opportunity items not already in the database.
@@ -221,8 +237,8 @@ Task:
     {{
       "title": "string (required)",
       "url": "string (required, human-friendly landing/detail URL)",
-    "detail_link_index": "integer (required, index of the chosen link from Top links)",
-    "detail_source_url": "string (optional, should equal the href of the chosen Top link)",
+      "detail_link_index": "integer (required, index of the chosen link from Top links)",
+      "detail_source_url": "string (optional, should equal the href of the chosen Top link)",
       "content_snippet": "string (optional, short excerpt from the page supporting the find)"
     }}
   ]
@@ -255,6 +271,7 @@ SCRAPE_NAV_SYSTEM = (
     "If yes, return status='final' and no next_link_index. If not, select the single most promising link index to continue navigation. "
     "If you see clear language that the opportunity is closed/expired/no longer accepting applications, or the expiration date listed is clearly in the past relative to TODAY shown in the prompt, return status='expired' immediately and stop. "
     "When a date is shown without a year, assume the year is the current year (TODAY) for comparisons. If that makes it in the past, treat it as expired. "
+    "Apply the same Healthcare IT scope filter as the listing step: if the CURRENT page clearly indicates the opportunity is not Healthcare IT / public health informatics / health data systems, return status='give_up'. "
     "Prefer links that look like they contain full details, PDF downloads, application packets, or solicitations. Avoid navigation loops and generic site pages."
 )
 
@@ -331,7 +348,15 @@ Rules:
  - Always provide deadline_iso when status is active or expired. Use the format YYYY-MM-DD. Compare it to TODAY to decide status. Do NOT roll to next year.
 """
 
+def today_str() -> str:
+    # Return YYYY-MM-DD using override envs if provided for deterministic tests.
+    t = (os.getenv("TODAY_OVERRIDE") or os.getenv("SM_TODAY") or os.getenv("RFP_TODAY") or "").strip()
+    if t:
+        return t[:10]
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
 def build_prompt(page_text: str, links: List[Dict[str, str]], existing: List[Dict[str, str]], page_url: str) -> str:
+    # Compose the listing-stage prompt with page text, anchors, and prior items.
     existing_lines = "\n".join(f"- {e.get('title','').strip()} | {e.get('url','').strip()}" for e in existing[:100])
     def fmt(l: Dict[str, Any], i: int) -> str:
         return (
@@ -341,7 +366,7 @@ def build_prompt(page_text: str, links: List[Dict[str, str]], existing: List[Dic
             f" | flags: learn_more={l.get('is_learn_more', False)}, apply={l.get('is_apply', False)}, pdf={l.get('is_pdf', False)}, generic_listing={l.get('is_generic_listing', False)}, depth={l.get('depth', 0)}"
         )
     link_lines = "\n".join(fmt(l, i) for i, l in enumerate(links))
-    today = time.strftime("%Y-%m-%d", time.gmtime())
+    today = today_str()
     return SCRAPE_PROMPT_TEMPLATE.format(
         existing=existing_lines or "(none)",
         text=page_text,
@@ -351,6 +376,7 @@ def build_prompt(page_text: str, links: List[Dict[str, str]], existing: List[Dic
     )
 
 def build_nav_prompt(page_text: str, links: List[Dict[str, str]], existing: List[Dict[str, str]], page_url: str, hop: int, max_hops: int) -> str:
+    # Compose the navigation prompt for a single hop decision.
     existing_titles = ", ".join(e.get('title','').strip() for e in existing[:40] if e.get('title')) or "(none)"
     def fmt(l: Dict[str, Any], i: int) -> str:
         return (
@@ -359,7 +385,7 @@ def build_nav_prompt(page_text: str, links: List[Dict[str, str]], existing: List
             f" | flags: learn_more={l.get('is_learn_more', False)}, apply={l.get('is_apply', False)}, pdf={l.get('is_pdf', False)}, depth={l.get('depth',0)}"
         )
     link_lines = "\n".join(fmt(l, i) for i, l in enumerate(links))
-    today = time.strftime("%Y-%m-%d", time.gmtime())
+    today = today_str()
     current_year = today.split("-")[0]
     return NAV_PROMPT_TEMPLATE.format(
         page_url=page_url,
@@ -373,7 +399,8 @@ def build_nav_prompt(page_text: str, links: List[Dict[str, str]], existing: List
     )
 
 def build_final_prompt(page_text: str, page_url: str) -> str:
-    today = time.strftime("%Y-%m-%d", time.gmtime())
+    # Compose the final validation prompt for deadline and scope classification.
+    today = today_str()
     current_year = today.split("-")[0]
     return FINAL_PROMPT_TEMPLATE.format(
         today=today,
@@ -383,6 +410,7 @@ def build_final_prompt(page_text: str, page_url: str) -> str:
     )
 
 def classify_final_page(page_text: str, page_url: str) -> Dict[str, Any]:
+    # Call FINAL prompt and normalize status and deadline_iso for downstream use.
     prompt = build_final_prompt(page_text, page_url)
     try:
         raw = call_bedrock(prompt, system=FINAL_SYSTEM, temperature=0.0, max_tokens=800)
@@ -404,6 +432,7 @@ def classify_final_page(page_text: str, page_url: str) -> Dict[str, Any]:
         return {"status": "unknown", "reason": "classification error", "deadline_iso": None}
 
 def summarize_rfp(rfp_text: str) -> str:
+    # Summarize a final RFP text into structured sections for storage/display.
     api_key = os.getenv("AWS_BEARER_TOKEN_BEDROCK")
     if not api_key:
         raise RuntimeError("Set your Bedrock API key in AWS_BEARER_TOKEN_BEDROCK")

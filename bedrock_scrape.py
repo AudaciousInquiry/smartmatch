@@ -25,16 +25,13 @@ from scrape_utils import (
     fetch_page,
     fetch_page_with_session,
     soup_text,
-    _link_context,
-    _nearest_heading,
     _link_flags,
-    _is_within,
     gather_links,
     is_pdf,
-    _canonical_no_frag_query,
-    _find_kendo_read_urls,
-    _extract_request_verification_token,
-    _fetch_json,
+    normalize_url,
+    find_kendo_read_urls,
+    extract_request_verification_token,
+    fetch_json,
     _extract_items_from_kendo_json,
     _find_iframe_srcs,
 )
@@ -48,6 +45,7 @@ DEFAULT_ENDPOINT = os.getenv("BEDROCK_ENDPOINT", llm_utils.build_bedrock_endpoin
 MAX_DETAIL_TEXT_CHARS = int(os.getenv("MAX_DETAIL_TEXT_CHARS", "400000"))
 
 def sanitize_text(val: Optional[str]) -> Optional[str]:
+    # Replace control characters that can upset the db
     if val is None:
         return None
     return re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F]", " ", val)
@@ -55,6 +53,7 @@ def sanitize_text(val: Optional[str]) -> Optional[str]:
  
 
 def load_existing(engine, domain: str, limit: int = 200) -> List[Dict[str, str]]:
+    # Return previously processed items to pass to the LLM to skip existing and pre-excluded RFPs
     with engine.connect() as conn:
         rows = conn.execute(
             text("""
@@ -81,7 +80,9 @@ def load_existing(engine, domain: str, limit: int = 200) -> List[Dict[str, str]]
 
  
 
-def _find_kendo_read_urls(soup: BeautifulSoup, base_url: str) -> List[str]:
+def find_kendo_read_urls(soup: BeautifulSoup, base_url: str) -> List[str]:
+    # Attempt extraction of Kendo Grid transport.read URLs from iFrame, 
+    # this is neccessary to resolve the CSTE extraction issue
     urls: List[str] = []
     try:
         for script in soup.find_all("script"):
@@ -98,7 +99,9 @@ def _find_kendo_read_urls(soup: BeautifulSoup, base_url: str) -> List[str]:
         pass
     return list(dict.fromkeys(urls))
 
-def _extract_request_verification_token(soup: BeautifulSoup) -> Optional[str]:
+def extract_request_verification_token(soup: BeautifulSoup) -> Optional[str]:
+    # Find ASP.NET RequestVerificationToken if present for POST fallbacks.
+    # This is used with the Kendo Grid JSON endpoints for CSTE extraction
     try:
         inp = soup.find('input', attrs={'name': '__RequestVerificationToken'})
         if inp and inp.get('value'):
@@ -110,7 +113,10 @@ def _extract_request_verification_token(soup: BeautifulSoup) -> Optional[str]:
         pass
     return None
 
-def _fetch_json(url: str, referer: Optional[str] = None, timeout: float = 20.0, session: Optional[requests.Session] = None, token: Optional[str] = None) -> Optional[Any]:
+def fetch_json(url: str, referer: Optional[str] = None, timeout: float = 20.0, session: Optional[requests.Session] = None, token: Optional[str] = None) -> Optional[Any]:
+    # Fetch JSON from Kendo endpoints using GET, then POST if needed.
+    # Many Kendo widgets require POST with a verification token. This helper tries
+    # GET first for simple cases, else POSTs a standard body using the token acquired earlier.
     try:
         headers = dict(UA_BASE)
         if referer:
@@ -138,6 +144,7 @@ def _fetch_json(url: str, referer: Optional[str] = None, timeout: float = 20.0, 
         return None
 
 def _extract_items_from_kendo_json(data: Any, base_url: str) -> List[Dict[str, str]]:
+    # Normalize common Kendo dataset shapes into pseudo-link items for the LLM.
     out: List[Dict[str, str]] = []
     try:
         rows = []
@@ -177,6 +184,7 @@ def _extract_items_from_kendo_json(data: Any, base_url: str) -> List[Dict[str, s
     return out
 
 def _find_iframe_srcs(soup: BeautifulSoup, base_url: str) -> List[str]:
+    # Collect iframe src URLs to optionally augment link discovery.
     srcs: List[str] = []
     try:
         for f in soup.find_all("iframe"):
@@ -187,30 +195,8 @@ def _find_iframe_srcs(soup: BeautifulSoup, base_url: str) -> List[str]:
         pass
     return list(dict.fromkeys(srcs))
 
-_GENERIC_TITLE_PATTERNS = [
-    re.compile(r"^request for proposals?$", re.I),
-    re.compile(r"^invitation for bids?$", re.I),
-    re.compile(r"^invitation to bid$", re.I),
-    re.compile(r"^request for qualifications?$", re.I),
-    re.compile(r"^request for information$", re.I),
-    re.compile(r"^notice of (funding|funds) opportunity$", re.I),
-    re.compile(r"^notice of funding availability$", re.I),
-    re.compile(r"^rfp$", re.I),
-]
-
-def is_generic_title(t: Optional[str]) -> bool:
-    if not t:
-        return True
-    tt = t.strip()
-    if len(tt) < 6:
-        return True
-    core = re.sub(r"^(rfp|rfa|rfq)\s*#?\d+[-: ]+", "", tt, flags=re.I).strip()
-    for pat in _GENERIC_TITLE_PATTERNS:
-        if pat.fullmatch(core.lower()):
-            return True
-    return False
-
 def init_processed_table(engine):
+    # Ensure the processed_rfps table exists and has expected columns.
     metadata = MetaData(schema='public')
     processed = Table(
         'processed_rfps', metadata,
@@ -233,9 +219,54 @@ def init_processed_table(engine):
         """))
     return processed
 
+def init_exclusions_table(engine):
+    # Ensure the rfp_exclusions table exists for persistent skip reasons.
+    metadata = MetaData(schema='public')
+    excluded = Table(
+        'rfp_exclusions', metadata,
+        Column('hash', String, primary_key=True),
+        Column('title', String),
+        Column('site', String),
+        Column('listing_url', String),
+        Column('detail_url', String),
+        Column('reason', String),  # out_of_scope | expired | unknown
+        Column('decided_at', String),
+    )
+    metadata.create_all(engine)
+    return excluded
+
+def is_excluded(conn, excluded_table, h: str) -> bool:
+    # Used to check if an exclusion with the given hash already exists so we waste resources processing them again
+    try:
+        row = conn.execute(select(excluded_table.c.hash).where(excluded_table.c.hash == h)).first()
+        return row is not None
+    except Exception:
+        return False
+
+def insert_exclusion(conn, excluded_table, *, h: str, title: str, site: str, listing_url: str, detail_url: Optional[str], reason: str):
+    # Insert a new exclusion record; ignore duplicates gracefully.
+    try:
+        conn.execute(
+            excluded_table.insert().values(
+                hash=h,
+                title=title,
+                site=site,
+                listing_url=listing_url,
+                detail_url=detail_url or None,
+                reason=reason,
+                decided_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            )
+        )
+    except Exception:
+        # Ignore duplicate insert errors
+        pass
+
  
 
-def _canonical_no_frag_query(u: str) -> str:
+def normalize_url(u: str) -> str:
+    # Normalize a URL by dropping fragments/query and lowercasing path.
+    # This doesn't happen often, but is used to catch cases where the model
+    # tries to point back to the same listing page.
     try:
         p = urlparse(u)
         path = (p.path or "").rstrip("/").lower()
@@ -244,9 +275,18 @@ def _canonical_no_frag_query(u: str) -> str:
         return u
 
 def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[str, Any]], page_url: str, links: List[Dict[str, str]], max_hops: int, per_page_max_text: int) -> List[Dict[str, Any]]:
+    # Navigate candidates to final pages, validate, summarize, and insert.
+    # For each item proposed by the LLM on the listing page:
+    # - Validate detail_link_index and avoid selecting the listing page itself.
+    # - Skip if it was previously excluded (by title+listing URL early check).
+    # - Navigate to the final detail/PDF, extracting robust text if PDF.
+    # - Run deadline classification first; persist expired/unknown as exclusions.
+    # - Run LLM-only scope gating on the final content.
+    # - De-dup by final URL, then summarize and insert into processed_rfps.
     new_rows = []
     content_cache: Dict[str, Tuple[str, Optional[bytes]]] = {}
     summary_cache: Dict[str, str] = {}
+    excluded_table = init_exclusions_table(engine)
     with engine.begin() as conn:
         for item in items:
             title = (item.get("title") or "").strip()
@@ -260,36 +300,41 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
             detail_src = links[idx].get("href") or ""
             if not detail_src:
                 continue
-            if _canonical_no_frag_query(detail_src) == _canonical_no_frag_query(page_url):
+            if normalize_url(detail_src) == normalize_url(page_url):
                 logger.warning(f"Skipping item '{title}': model selected listing URL as detail link")
                 continue
 
+            # Precompute a hash for early exclusion checks (title+listing URL)
             h = hashlib.sha256((title + url).encode("utf-8")).hexdigest()
-            exists = conn.execute(select(processed_table.c.hash).where(processed_table.c.hash == h)).first()
-            if exists:
-                logger.info(f"Skipping existing: {title}")
+            if is_excluded(conn, excluded_table, h):
+                logger.info(f"Skipping previously-excluded: {title}")
                 continue
 
             final_url, final_title, final_text = navigate_to_final(detail_src, existing=[], max_hops=max_hops, per_page_max_text=per_page_max_text)
             if not final_url or not final_text:
-                logger.info(f"Navigation failed to resolve final RFP for '{title}'")
+                logger.info(f"Navigation failed to resolve final RFP for '{title}' (transient, not excluded)")
+                # Treat as transient: do NOT persist exclusion; allow future retry
                 continue
 
-            if is_pdf(final_url) and (not final_text or len(final_text) < 50):
-                try:
-                    pdf_text, pdf_url = extract_detail(final_url, referer=page_url)
-                    if pdf_text and pdf_url:
-                        final_text = pdf_text
-                        final_url = pdf_url
-                except Exception:
-                    logger.exception(f"Failed to extract PDF text for final URL {final_url}")
-                    continue
+            # Always extract PDF text if final URL is a PDF (even if some text exists)
+            try:
+                if is_pdf(final_url):
+                    parsed_text, detected_pdf_url = extract_detail(final_url, referer=page_url)
+                    if parsed_text:
+                        final_text = parsed_text
+                    if detected_pdf_url:
+                        final_url = detected_pdf_url
+            except Exception:
+                logger.exception(f"Failed to extract PDF text for final URL {final_url} (transient, not excluded)")
+                # Treat as transient: do NOT persist exclusion; allow future retry
+                continue
 
+            # Classify deadline first
             final_check = llm_utils.classify_final_page(final_text or "", final_url)
             status_lower = (final_check.get("status") or "").lower()
-            enforce = os.getenv("FINAL_DATE_ENFORCE", "1").strip().lower() in ("1", "true", "yes", "on")
+            enforce = os.getenv("FINAL_DATE_ENFORCE", "true").strip().lower() in ("true")
             if enforce:
-                today = time.strftime("%Y-%m-%d", time.gmtime())
+                today = llm_utils.today_str()
                 dline = final_check.get("deadline_iso")
                 try:
                     if dline and len(dline) == 10 and dline <= today:
@@ -303,18 +348,53 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
                 if enforce and dline and len(dline) == 10 and orig_status != status_lower:
                     logger.info(
                         f"Skipping '{title}' due to final page effective_status={status_lower} "
-                        f"(overridden: orig_status={orig_status}, deadline_iso={dline} <= today={today}) reason={reason}"
+                        f"(overridden: orig_status={orig_status}, deadline_iso={dline} <= today={llm_utils.today_str()}) reason={reason}"
                     )
                 else:
                     if dline:
                         logger.info(f"Skipping '{title}' due to final page status={status_lower} deadline_iso={dline} reason={reason}")
                     else:
                         logger.info(f"Skipping '{title}' due to final page status={status_lower} reason={reason}")
+                # Exclusion keyed on final_url for stability across runs
+                h_excl = hashlib.sha256((title + final_url).encode("utf-8")).hexdigest()
+                insert_exclusion(conn, excluded_table, h=h_excl, title=title, site=site_name, listing_url=page_url, detail_url=final_url, reason="expired" if status_lower=="expired" else "unknown")
                 continue
 
-            chosen_title = title
-            if final_title and not is_generic_title(final_title) and is_generic_title(title):
-                chosen_title = final_title.strip()
+            # Scope decision on final content (LLM-only)
+            llm_ok = True
+            try:
+                # LLM scope check with a compact JSON prompt 
+                # TODO: use with_structured_output
+                scope_system = (
+                    "Classify ONLY if this opportunity is clearly Healthcare IT / public health informatics / health data systems. "
+                    "Require explicit health-related context (e.g., public health, EHR/EMR, HIE, HL7/FHIR, HIPAA/PHI, Medicaid, disease surveillance, immunization). "
+                    "Do NOT infer based on possible presence of health fields in otherwise non-health systems. "
+                    "Explicitly EXCLUDE education/SIS, justice/law-enforcement, traffic/public safety, and other non-health government IT. "
+                    "Return JSON only: {\"in_scope\": true|false, \"reason\": \"...\"}."
+                )
+                scope_prompt = (
+                    f"TITLE: {(final_title or title)[:300]}\nURL: {final_url}\n\nCONTENT (truncated):\n<<<\n{(final_text or '')[:12000]}\n>>>\n"
+                )
+                raw_scope = llm_utils.call_bedrock(scope_prompt, system=scope_system, temperature=0.0, max_tokens=300)
+                sc = llm_utils.extract_json(raw_scope)
+                llm_ok = bool(sc.get("in_scope", False))
+                try:
+                    logger.info(f"SCOPE LLM: in_scope={llm_ok} reason={(sc.get('reason') or '')[:1800]}")
+                except Exception:
+                    pass
+            except Exception:
+                logger.exception("LLM scope classification failed")
+                llm_ok = False
+            accept = llm_ok
+            logger.info(f"SCOPE DECISION: llm={llm_ok} accept={accept} title='{title}'")
+            if not accept:
+                logger.info(f"Skipping '{title}' as out-of-scope after final-page checks")
+                h_excl = hashlib.sha256((title + final_url).encode("utf-8")).hexdigest()
+                insert_exclusion(conn, excluded_table, h=h_excl, title=title, site=site_name, listing_url=page_url, detail_url=final_url, reason="out_of_scope")
+                continue
+
+            # Prefer the final page's title when available
+            chosen_title = final_title.strip() if final_title else title
 
             pdf_bytes = None
             try:
@@ -330,6 +410,12 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
                         final_url = detected_pdf_url
             except Exception:
                 logger.exception(f"Failed robust PDF confirm/fetch for {final_url}")
+
+            # Dedup by final URL prior to expensive summarization/insert
+            existing_by_url = conn.execute(select(processed_table.c.hash).where(processed_table.c.url == final_url)).first()
+            if existing_by_url:
+                logger.info(f"Skipping existing by URL: {chosen_title} -> {final_url}")
+                continue
 
             detail_content = (final_text or "")[:MAX_DETAIL_TEXT_CHARS]
             ai_summary = None
@@ -349,9 +435,13 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
             if ai_summary:
                 ai_summary = sanitize_text(ai_summary)
 
+            # Hash based on final URL
+            h_final = hashlib.sha256(final_url.encode('utf-8')).hexdigest()
+
+            # Final insert into processed_rfps for all determined values
             conn.execute(
                 processed_table.insert().values(
-                    hash=h,
+                    hash=h_final,
                     title=chosen_title,
                     url=final_url,
                     site=site_name,
@@ -365,7 +455,7 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
                 "title": chosen_title,
                 "url": final_url,
                 "detail_source_url": final_url,
-                "hash": h,
+                "hash": h_final,
                 "has_detail": bool(detail_content),
                 "ai_summary": ai_summary,
             })
@@ -373,15 +463,19 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
     return new_rows
 
 def _fetch_links_and_text(url: str, max_text: int = 20000, max_links: int = 120) -> Tuple[str, List[Dict[str,str]]]:
+    # Fetch a page and return its readable text and discovered links.
     soup = fetch_page(url)
     txt = soup_text(soup, max_chars=max_text)
     lnks = gather_links(soup, url, max_links=max_links, page_url=url)
     return txt, lnks
 
 def navigate_to_final(start_url: str, existing: List[Dict[str,str]], max_hops: int, per_page_max_text: int = 16000) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """Iteratively call Bedrock to reach a final RFP page.
-    Returns (final_url, final_title, final_page_text) or (None,None,None).
-    """
+    # Iteratively navigate to the final RFP page or PDF.
+    # Uses the NAV prompt to either stop on a final page, continue to a single
+    # best next link, or give up/expire. Returns:
+    # - (final_url, final_title, final_page_text) on success
+    # - (None, None, None) if navigation fails or gives up
+    # PDFs are parsed via detail_extractor to provide normalized text.
     visited = set()
     current_url = start_url
     final_title = None
@@ -473,6 +567,7 @@ def navigate_to_final(start_url: str, existing: List[Dict[str,str]], max_hops: i
     return None, None, None
 
 def main():
+    # CLI entrypoint for probing a single listing URL.
     parser = argparse.ArgumentParser(description="LLM-driven RFP probe (single URL)")
     parser.add_argument("--url", required=True, help="Page URL to analyze")
     parser.add_argument("--site", default=None, help="Site name to store (default = domain)")
@@ -527,6 +622,10 @@ def process_listing(listing_url: str, site_name: Optional[str], engine=None, *, 
                     max_hops: int = 5, nav_page_max_text: int = 16000, timeout_read: float = 60.0, timeout_connect: float = 10.0, retries: int = 2,
                     no_system_prompt: bool = False, temperature: float = 0.0, model_id: Optional[str] = None, region: Optional[str] = None,
                     endpoint: Optional[str] = None, log_bedrock_raw: bool = False, log_bedrock_raw_chars: int = 2000) -> List[Dict[str, Any]]:
+    # End-to-end processing of a single listing page URL.
+    # - Fetch page and extract text/links
+    # - Ask LLM to propose concrete items with a detail_link_index.
+    # - Forward the items to upsert_new_items for navigation and insertion.
     domain = urlparse(listing_url).netloc
     site = site_name or domain
     created_engine = False
@@ -534,18 +633,25 @@ def process_listing(listing_url: str, site_name: Optional[str], engine=None, *, 
         engine = create_engine(ConfigurationValues.get_pgvector_connection())
         created_engine = True
     processed = init_processed_table(engine)
+    excluded_table = init_exclusions_table(engine)
     session = requests.Session()
-    soup = fetch_page_with_session(session, listing_url)
+    try:
+        soup = fetch_page_with_session(session, listing_url)
+    except Exception:
+        logger.exception(f"Failed to fetch listing URL; skipping: {listing_url}")
+        if created_engine:
+            engine.dispose()
+        return []
 
     page_text = soup_text(soup, max_chars=max_text)
     links = gather_links(soup, listing_url, max_links=max_links, page_url=listing_url)
 
     try:
-        kendo_urls = _find_kendo_read_urls(soup, listing_url)
-        token = _extract_request_verification_token(soup)
+        kendo_urls = find_kendo_read_urls(soup, listing_url)
+        token = extract_request_verification_token(soup)
         kendo_items: List[Dict[str, str]] = []
         for ku in kendo_urls[:3]: 
-            data = _fetch_json(ku, referer=listing_url, session=session, token=token)
+            data = fetch_json(ku, referer=listing_url, session=session, token=token)
             if data is None:
                 continue
             kendo_items.extend(_extract_items_from_kendo_json(data, listing_url))
@@ -587,6 +693,22 @@ def process_listing(listing_url: str, site_name: Optional[str], engine=None, *, 
     except Exception:
         pass
     existing = load_existing(engine, domain, limit=200)
+    # Inform the model about excluded items by using title+listing URL with exclusion reason
+    # TODO: increase limit if needed in future
+    try:
+        with engine.connect() as conn:
+            ex_rows = conn.execute(text("""
+                SELECT title, listing_url as url
+                FROM public.rfp_exclusions
+                WHERE site = :site
+                  AND reason IN ('out_of_scope','expired')
+                ORDER BY decided_at DESC
+                LIMIT 500
+            """), {"site": site}).mappings().all()
+            if ex_rows:
+                existing.extend([dict(r) for r in ex_rows])
+    except Exception:
+        logger.exception("Failed to load exclusions to seed existing list")
     prompt = llm_utils.build_prompt(page_text, links, existing, page_url=listing_url)
     system_prompt = None if no_system_prompt else llm_utils.SCRAPE_SYSTEM_PROMPT
     chosen_model = (model_id or os.getenv("BEDROCK_MODEL_ID") or llm_utils.DEFAULT_MODEL_ID).strip()

@@ -1,23 +1,45 @@
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse, urljoin
-
 import requests
-from bs4 import BeautifulSoup
 from loguru import logger
+from urllib.parse import urlsplit, urlunsplit, urlparse, urljoin  # core URL helpers
 
-UA_BASE: Dict[str, str] = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/125.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+from typing import Any, Dict, List, Optional, Tuple
+from bs4 import BeautifulSoup
+
+UA_BASE = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+# Single shared UA definition so that site behavior is consistent(some block default agents)
+def fetch_page_with_session(session: requests.Session, url: str, timeout: int = 20) -> BeautifulSoup:
+    try:
+        parts = urlsplit(url)
+        origin = f"{parts.scheme}://{parts.netloc}"
+    except Exception:
+        origin = None
+    headers = dict(UA_BASE)
+    if origin:
+        headers["Referer"] = origin
+    last_err = None
+    for attempt in range(3):
+        try:
+            r = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+            r.raise_for_status()
+            return BeautifulSoup(r.text, "html.parser")
+        except requests.RequestException as e:
+            last_err = e
+            if attempt < 2:
+                logger.warning(f"GET failed for {url} (attempt {attempt+1}/3): {e}; retrying...")
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            logger.error(f"GET failed after retries for {url}: {e}")
+            raise
+
 def fetch_page(url: str) -> BeautifulSoup:
+    # Stateless fetch (convenience wrapper) with same headers as session variant.
     origin = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
     headers = dict(UA_BASE)
     headers["Referer"] = origin
@@ -25,19 +47,13 @@ def fetch_page(url: str) -> BeautifulSoup:
     resp.raise_for_status()
     return BeautifulSoup(resp.text, "html.parser")
 
-def fetch_page_with_session(session: requests.Session, url: str) -> BeautifulSoup:
-    origin = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
-    headers = dict(UA_BASE)
-    headers["Referer"] = origin
-    r = session.get(url, headers=headers, timeout=20, allow_redirects=True)
-    r.raise_for_status()
-    return BeautifulSoup(r.text, "html.parser")
-
 def soup_text(soup: BeautifulSoup, max_chars: int = 20000) -> str:
+    # Return bounded plain text from soup for inclusion in prompts.
     txt = soup.get_text(separator="\n", strip=True)
     return txt[:max_chars]
 
 def _link_context(a: Any, max_len: int = 500) -> str:
+    # Find a semantic container (li/article/div/td/etc) for richer snippet.
     try:
         node = a
         for _ in range(8):
@@ -55,6 +71,7 @@ def _link_context(a: Any, max_len: int = 500) -> str:
         return ""
 
 def _nearest_heading(a: Any) -> str:
+    # Locate closest preceding heading to supply hierarchy context.
     try:
         h = a.find_previous(["h1", "h2", "h3", "h4", "h5", "h6"])
         if h is not None:
@@ -64,6 +81,7 @@ def _nearest_heading(a: Any) -> str:
     return ""
 
 def _link_flags(text: str, href: str) -> Dict[str, Any]:
+    # Cheap heuristics for link intent (apply, learn more, pdf, etc).
     t = (text or "").lower()
     h = (href or "").lower()
     is_pdf_flag = h.endswith(".pdf")
@@ -76,6 +94,7 @@ def _link_flags(text: str, href: str) -> Dict[str, Any]:
     }
 
 def _is_within(a: Any, tag_names: tuple[str, ...]) -> bool:
+    # Return True if anchor resides inside one of the given tag types.
     try:
         node = a
         for _ in range(6):
@@ -89,26 +108,29 @@ def _is_within(a: Any, tag_names: tuple[str, ...]) -> bool:
         return False
     return False
 
+
 def gather_links(soup: BeautifulSoup, base: str, max_links: int = 50, page_url: Optional[str] = None) -> List[Dict[str, str]]:
+    # Extract candidate anchors with contextual metadata & filtering.
+ 
     links = []
     seen = set()
-    can_page = _canonical_no_frag_query(page_url) if page_url else None
+    can_page = normalize_url(page_url) if page_url else None
     page_host = urlparse(page_url).netloc if page_url else None
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
         if not href or href.startswith("#"):
             continue
         full = urljoin(base, href)
-        can = _canonical_no_frag_query(full)
+        can = normalize_url(full)
         if can_page and can == can_page:
-            continue
+            continue  # self-reference / same canonical page
         if _is_within(a, ("header", "nav", "footer")):
-            continue
+            continue  # navigation chrome
         host = urlparse(full).netloc
         if page_host and host != page_host and not is_pdf(full):
-            continue
+            continue  # off-site (non-PDF)
         if full in seen:
-            continue
+            continue  # duplicate
         seen.add(full)
         text = a.get_text(" ", strip=True)[:200]
         heading = _nearest_heading(a)
@@ -125,12 +147,14 @@ def gather_links(soup: BeautifulSoup, base: str, max_links: int = 50, page_url: 
     return links
 
 def is_pdf(u: str) -> bool:
+    # True if URL path ends with '.pdf'.
     try:
         return urlparse(u).path.lower().endswith(".pdf")
     except Exception:
         return False
 
-def _canonical_no_frag_query(u: str) -> str:
+def normalize_url(u: str) -> str:
+    # Normalize URL (strip query/fragment & trailing slash) for dedupe.
     try:
         p = urlparse(u)
         path = (p.path or "").rstrip("/").lower()
@@ -138,7 +162,8 @@ def _canonical_no_frag_query(u: str) -> str:
     except Exception:
         return u
 
-def _find_kendo_read_urls(soup: BeautifulSoup, base_url: str) -> List[str]:
+def find_kendo_read_urls(soup: BeautifulSoup, base_url: str) -> List[str]:
+    # Scrape inline <script> blocks for Kendo Grid transport.read URLs.
     urls: List[str] = []
     try:
         for script in soup.find_all("script"):
@@ -155,7 +180,8 @@ def _find_kendo_read_urls(soup: BeautifulSoup, base_url: str) -> List[str]:
         pass
     return list(dict.fromkeys(urls))
 
-def _extract_request_verification_token(soup: BeautifulSoup) -> Optional[str]:
+def extract_request_verification_token(soup: BeautifulSoup) -> Optional[str]:
+    # Find ASP.NET anti-forgery token (input or meta).
     try:
         inp = soup.find('input', attrs={'name': '__RequestVerificationToken'})
         if inp and inp.get('value'):
@@ -167,7 +193,8 @@ def _extract_request_verification_token(soup: BeautifulSoup) -> Optional[str]:
         pass
     return None
 
-def _fetch_json(url: str, referer: Optional[str] = None, timeout: float = 20.0, session: Optional[requests.Session] = None, token: Optional[str] = None) -> Optional[Any]:
+def fetch_json(url: str, referer: Optional[str] = None, timeout: float = 20.0, session: Optional[requests.Session] = None, token: Optional[str] = None) -> Optional[Any]:
+    # Attempt GET first, fallback to POST (with anti-forgery token if provided).
     try:
         headers = dict(UA_BASE)
         if referer:
@@ -195,6 +222,7 @@ def _fetch_json(url: str, referer: Optional[str] = None, timeout: float = 20.0, 
         return None
 
 def _extract_items_from_kendo_json(data: Any, base_url: str) -> List[Dict[str, str]]:
+    # Normalize heterogeneous Kendo JSON rows into uniform link-ish dicts.
     out: List[Dict[str, str]] = []
     try:
         rows = []
@@ -234,6 +262,7 @@ def _extract_items_from_kendo_json(data: Any, base_url: str) -> List[Dict[str, s
     return out
 
 def _find_iframe_srcs(soup: BeautifulSoup, base_url: str) -> List[str]:
+    # Return absolute iframe src URLs (deduplicated).
     srcs: List[str] = []
     try:
         for f in soup.find_all("iframe"):

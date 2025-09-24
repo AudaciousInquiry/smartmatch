@@ -15,6 +15,7 @@ import { getRfpDetail, downloadPdf, RfpDetailRow } from './lib/api';
 import { ScheduleCard } from "../components/ScheduleCard";
 import { MailingListCard } from "../components/MailingListCard";
 
+// Format timestamp strings 
 function fmt(dt: string | null) {
   if (!dt) return "";
   const d = new Date(dt);
@@ -23,39 +24,46 @@ function fmt(dt: string | null) {
 }
 
 export default function Home() {
+  //  RFP listing state 
   const [rows, setRows] = useState<RfpRow[]>([]);
   const [loading, setLoading] = useState(false);
+  //  Scrape triggers 
   const [running, setRunning] = useState(false);
+  //  Schedule panel 
   const [showSchedule, setShowSchedule] = useState(false);
   const [schedule, setSchedule] = useState<any | null>(null);
   const [scheduling, setScheduling] = useState(false);
+  //  Mailing lists 
   const [showMailing, setShowMailing] = useState(false);
   const [mailing, setMailing] = useState<{ main_recipients: string[]; debug_recipients: string[] } | null>(null);
+  // (q reserved for future server-side search)
   const [q, setQ] = useState("");  
-  
+  //  Sorting / filtering 
   const [sortField, setSortField] = useState<keyof RfpRow>("processed_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [filterText, setFilterText] = useState("");
+  //  Detail view 
   const [selectedRow, setSelectedRow] = useState<RfpDetailRow | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   
   const scheduleRef = useRef<HTMLDivElement>(null);
   const mailingRef = useRef<HTMLDivElement>(null);
   
+  // Fetch current RFP rows (limit 500)
   const load = async () => {
     setLoading(true);
     try {
-      const res = await listRfps({ q, limit: 200, sort: "processed_at", order: "desc" });
+      const res = await listRfps({ q, limit: 500, sort: "processed_at", order: "desc" });
       setRows(res.data);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    load();
-  }, []);
+  // Initial load
+  useEffect(() => { load(); }, []);
 
+  // Fetch schedule + email settings once on mount
   useEffect(() => {
     (async () => {
       try {
@@ -73,6 +81,7 @@ export default function Home() {
     })();
   }, []);
 
+  // Manual scrape trigger (also triggers emails)
   const onRunNow = async () => {
     setRunning(true);
     try {
@@ -84,6 +93,7 @@ export default function Home() {
     }
   };
 
+  // Open schedule panel OR submit new schedule settings
   const onScheduleRun = async (payload?: { hour: number; minute: number; frequency: number }) => {
     if (!payload) {
       setShowSchedule(!showSchedule);
@@ -112,6 +122,7 @@ export default function Home() {
     }
   };
 
+  // Disable scheduling (clears next/last run)
   const onClearSchedule = async () => {
     setScheduling(true);
     try {
@@ -124,6 +135,7 @@ export default function Home() {
     }
   };
 
+  // Toggle sort direction or set new sort field (stable for ties)
   const handleSort = (field: keyof RfpRow) => {
     if (field === sortField) {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
@@ -133,6 +145,7 @@ export default function Home() {
     }
   };
 
+  // Derive table rows => filter then sort; memoized to avoid rework on unrelated state changes
   const filteredAndSortedRows = useMemo(() => {
     // First filter the data
     let filteredRows = rows;
@@ -182,6 +195,7 @@ export default function Home() {
     });
   }, [rows, filterText, sortField, sortDirection]);
 
+  // Load full detail (and switch panel) when selecting a row
   const handleRowClick = async (hash: string) => {
     setLoadingDetail(true);
     try {
@@ -194,6 +208,7 @@ export default function Home() {
     }
   };
 
+  // Request PDF bytes from DB and trigger download
   const handleDownloadPdf = async () => {
     if (!selectedRow) return;
     
@@ -212,6 +227,7 @@ export default function Home() {
     }
   };
 
+  // Memoized tbody element (depends on filtered list + click handler)
   const tableRows = useMemo(() => (
     <tbody className="text-gray-200">
       {filteredAndSortedRows.map((r, index) => (
@@ -249,6 +265,7 @@ export default function Home() {
     </tbody>
   ), [filteredAndSortedRows, handleRowClick]);
 
+  // Outer table wrapper (headers separated for clarity / sorting)
   const table = useMemo(
     () => (
       <div className="overflow-x-auto rounded-xl border border-gray-700/50 bg-gray-800/50 backdrop-blur-sm shadow-xl">
@@ -309,6 +326,7 @@ export default function Home() {
     [filteredAndSortedRows, loading]
   );
 
+  // Dismiss floating panels when clicking elsewhere
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (scheduleRef.current && !scheduleRef.current.contains(event.target as Node)) {
@@ -327,7 +345,7 @@ export default function Home() {
     <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6 space-y-8">
       <header className="flex items-center justify-between bg-gray-800/60 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 shadow-lg">
         <h1 className="text-3xl font-bold text-white">SmartMatch Admin Console</h1>
-        <div className="flex items-center gap-3"> {/* Changed from space-x-3 to flex and gap-3 */}
+        <div className="flex items-center gap-3"> 
           <button
             onClick={load}
             disabled={loading}
@@ -338,7 +356,7 @@ export default function Home() {
               {loading ? "Loading…" : "Refresh"}
             </span>
           </button>
-          <div className="relative inline-block"> {/* Added inline-block */}
+          <div className="relative inline-block"> 
             <button
               onClick={() => onScheduleRun()}
               disabled={scheduling}
@@ -406,7 +424,7 @@ export default function Home() {
         </div>
       </header>
 
-      {selectedRow ? (
+  {selectedRow ? (
         <DetailView 
           data={selectedRow}
           onBack={() => setSelectedRow(null)}

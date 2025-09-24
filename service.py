@@ -13,7 +13,7 @@ from importlib import reload
 from contextlib import asynccontextmanager
 import asyncio
 import os
-from zoneinfo import ZoneInfo  # Py>=3.9
+from zoneinfo import ZoneInfo
 
 from configuration_values import ConfigurationValues
 from email_utils import send_email
@@ -46,8 +46,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-engine = create_engine(ConfigurationValues.get_pgvector_connection())
-metadata = MetaData(schema="public")
+engine = create_engine(ConfigurationValues.get_pgvector_connection())  # single engine reused
+metadata = MetaData(schema="public")  # explicit schema to simplify cross-env deploys
 
 scrape_config = Table(
     "scrape_config", metadata,
@@ -82,6 +82,7 @@ processed_rfps = Table(
 )
 
 def init_db():
+    # Idempotent migrations for added text / pdf columns (avoid separate alembic).
     with engine.begin() as conn:
         conn.execute(text("""
             ALTER TABLE public.processed_rfps 
@@ -107,6 +108,7 @@ init_db()
 metadata.create_all(engine)
 
 def get_sched_tz() -> datetime.tzinfo:
+    # Resolve timezone for scheduling logic honoring env overrides.
     tz_name = os.getenv("SCHEDULE_TIMEZONE") or os.getenv("SCHED_TZ") or os.getenv("TZ")
     if tz_name:
         try:
@@ -116,16 +118,19 @@ def get_sched_tz() -> datetime.tzinfo:
     return datetime.datetime.now().astimezone().tzinfo
 
 class ScheduleUpdate(BaseModel):
+    # Payload for scheduling updates (sets next run anchor & cadence).
     enabled: bool
     interval_hours: float = Field(gt=0)
     next_run_hour: int = Field(ge=0, lt=24)
     next_run_minute: int = Field(ge=0, lt=60)
 
 class EmailSettingsUpdate(BaseModel):
+    # List management for recipients of scrape result emails.
     main_recipients: List[EmailStr]
     debug_recipients: List[EmailStr]
 
 def get_or_create_config(conn):
+    # Ensure scrape_config singleton row exists; return row.
     q = select(scrape_config).where(scrape_config.c.id == "singleton")
     row = conn.execute(q).first()
     if not row:
@@ -142,6 +147,7 @@ def get_or_create_config(conn):
     return row
 
 def get_or_create_email_settings(conn):
+    # Ensure email_settings singleton row exists; return row.
     q = select(email_settings).where(email_settings.c.id == "singleton")
     row = conn.execute(q).first()
     if not row:
@@ -164,6 +170,8 @@ def list_rfps(
     sort: str = "processed_at", 
     order: str = "desc"
 ):
+    # Return recent processed RFP rows (basic listing).
+    # NOTE: 'q' currently unused (placeholder for future filtering / search).
     with engine.connect() as conn:
         query = select(
             processed_rfps.c.processed_at,
@@ -186,6 +194,7 @@ def list_rfps(
 
 @app.get("/schedule")
 def get_schedule():
+    # Fetch current scheduling configuration.
     with engine.connect() as conn:
         row = conn.execute(text("SELECT * FROM scrape_config WHERE id = 'singleton'")).first()
         if not row:
@@ -200,6 +209,8 @@ def get_schedule():
 
 @app.put("/schedule")
 def update_schedule(payload: ScheduleUpdate):
+    # Set enabled state, interval, and next run anchor time.
+    # If provided time already passed today (in scheduling TZ) roll forward 1 day.
     try:
         logger.info(f"Received schedule update: {payload}")
         sched_tz = get_sched_tz()
@@ -253,6 +264,7 @@ def update_schedule(payload: ScheduleUpdate):
 
 @app.get("/email-settings")
 def get_email_settings():
+    # Return current main + debug recipient lists.
     with engine.connect() as conn:
         row = get_or_create_email_settings(conn)
         return {
@@ -262,6 +274,7 @@ def get_email_settings():
 
 @app.put("/email-settings")
 def set_email_settings(payload: EmailSettingsUpdate):
+    # Upsert recipient lists (atomic).
     try:
         now = datetime.datetime.utcnow()
         with engine.begin() as conn:
@@ -300,6 +313,7 @@ def set_email_settings(payload: EmailSettingsUpdate):
 
 @app.post("/scrape")
 def trigger_scrape(send_main: Optional[bool] = True, send_debug: Optional[bool] = True):
+    # Imperatively run the scraper now (optionally email results).
     try:
         import sys
         from pathlib import Path
@@ -322,6 +336,7 @@ def trigger_scrape(send_main: Optional[bool] = True, send_debug: Optional[bool] 
 
 @app.get("/rfps/{hash}")
 def get_rfp_detail(hash: str):
+    # Return full detail for a single processed RFP (excluding raw PDF).
     with engine.connect() as conn:
         result = conn.execute(
             select(processed_rfps).where(processed_rfps.c.hash == hash)
@@ -345,6 +360,7 @@ def get_rfp_detail(hash: str):
 
 @app.delete("/rfps/{hash}")
 def delete_rfp(hash: str):
+    # Delete processed RFP (hard delete).
     try:
         with engine.begin() as conn:
             row = conn.execute(
@@ -364,6 +380,7 @@ def delete_rfp(hash: str):
 
 @app.get("/rfps/{hash}/pdf")
 def get_rfp_pdf(hash: str):
+    # Return raw PDF bytes (attachment) if stored.
     with engine.connect() as conn:
         row = conn.execute(
             select(processed_rfps.c.pdf_content, processed_rfps.c.title)
@@ -383,6 +400,8 @@ def get_rfp_pdf(hash: str):
         )
 
 async def check_and_run_schedule():
+    # Background loop: claim & execute due scheduled runs every 60s.
+    # Uses SELECT ... FOR UPDATE to prevent concurrent claims across replicas.
     logger.info("Scheduler started")
     while True:
         try:
@@ -460,6 +479,7 @@ async def check_and_run_schedule():
 
 @app.delete("/schedule")
 def clear_schedule():
+    # Disable schedule & null out next/last run timestamps.
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     with engine.begin() as conn:
         # ensure singleton exists
