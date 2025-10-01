@@ -63,6 +63,9 @@ class ConfigurationValues:
 #CO
 # Need to figure out sorting https://www.bidscolorado.com/co/portal.nsf/xpPAViewSolOpenbyNumber.xsp
 
+#NE
+# Sorting https://das.nebraska.gov/materiel/bid-opportunities.html#:~:text=Vital%20Records%20Management%20System%2005%2F22%2F25,Health%20and%20Human%20Services%2005%2F22%2F2025
+
 
 
 ############### Ignore - these have issues
