@@ -46,14 +46,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-engine = create_engine(ConfigurationValues.get_pgvector_connection())  # single engine reused
-metadata = MetaData(schema="public")  # explicit schema to simplify cross-env deploys
+engine = create_engine(ConfigurationValues.get_pgvector_connection())
+metadata = MetaData(schema="public") 
 
 scrape_config = Table(
     "scrape_config", metadata,
     Column("id", String, primary_key=True, default="singleton"),
     Column("enabled", Boolean, nullable=False, default=True),
-    Column("interval_hours", Float, nullable=False, default=24.0),  # changed to Float
+    Column("interval_hours", Float, nullable=False, default=24.0),
     Column("last_run_at", DateTime),
     Column("next_run_at", DateTime),
     Column("created_at", DateTime, default=datetime.datetime.utcnow),
@@ -82,7 +82,6 @@ processed_rfps = Table(
 )
 
 def init_db():
-    # Idempotent migrations for added text / pdf columns (avoid separate alembic).
     with engine.begin() as conn:
         conn.execute(text("""
             ALTER TABLE public.processed_rfps 

@@ -204,7 +204,7 @@ SCRAPE_SYSTEM_PROMPT = (
     "- or are is_pdf=true and clearly about the item, "
     "and avoid links where is_generic_listing=true. "
     "Scope filter: ONLY include items that are clearly Healthcare IT / public health informatics / health data systems. "
-    "Examples to INCLUDE: data modernization, surveillance systems, registries, LIMS, HIE, EHR/EMR, HL7/FHIR, interoperability, data platforms/warehouses (Snowflake/Azure/AWS/GCP), ETL/ELT, APIs/integration, dashboards/BI/analytics, cloud engineering, cybersecurity for health data. "
+    "Examples to INCLUDE: data modernization, registries, LIMS, HIE, EHR/EMR, HL7/FHIR, interoperability, data platforms/warehouses (Snowflake/Azure/AWS/GCP), ETL/ELT, APIs/integration, dashboards/BI/analytics, cloud engineering, cybersecurity for health data. "
     "Examples to EXCLUDE: construction/facilities, architectural, legal, HR/staffing jobs, direct clinical services, supplies/equipment, travel, printing, events, general marketing/comms, non-IT training not about data systems. "
     "If topic is ambiguous or not enough information is shown on this page, OMIT it at the listing stage. "
     "Return strict JSON only, no comments or markdown. IMPORTANT: Only include an item if the date you rely on is clearly a submission / application / proposal deadline (NOT a posted/published/announcement date). If the only visible date is a posted/publish date and there is no explicit deadline language (e.g., Due/Deadline/Closing), omit the item. Your answer will be evaluated primarily by whether detail_link_index correctly references a link in \"Top links\" that provides specific details for the item."
@@ -439,6 +439,7 @@ def summarize_rfp(rfp_text: str) -> str:
     region = os.getenv("BEDROCK_REGION", "us-east-1").strip()
     model_id = os.getenv("BEDROCK_MODEL_ID", DEFAULT_MODEL_ID).strip()
     url = os.getenv("BEDROCK_ENDPOINT", build_bedrock_endpoint(model_id, region)).strip()
+    #TODO use call bedrock for this
     payload = {
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 1000,
