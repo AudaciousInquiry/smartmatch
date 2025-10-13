@@ -28,5 +28,23 @@ services:
       # This is internal communication so the port stays as 5432 as its available on the container
       - PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@postgres:5432/smartmatch
 
+  frontend:
+    build: ./rfp-console
+    container_name: smartmatchai_frontend
+    depends_on:
+      - app
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./rfp-console:/app
+      - /app/node_modules  # Anonymous volume to prevent overwriting node_modules
+      - /app/.next         # Anonymous volume for Next.js build cache
+    environment:
+      # API URL for the frontend to connect to the backend
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      # Enable file watching with polling for Windows + Docker so the frontend reloads on code changes
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+
 volumes:
   pgdata:

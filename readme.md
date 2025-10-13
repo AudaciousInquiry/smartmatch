@@ -2,10 +2,11 @@
 
 ### Option 1: Full Docker Stack (No environment setup needed)
 ```shell
-# Run both database and API in Docker
+# Run database, backend API application, and frontend UI in Docker
 docker compose up -d
 
-# Access API at: http://localhost:8000
+# Access Frontend at: http://localhost:3000
+# Access API at: http://localhost:8000 (Note, no route is defined for / so don't expect an interesting response...try /rfps, /schedule, /email-settings, /scrape, or see /docs for more options)
 # API docs at: http://localhost:8000/docs
 ```
 
@@ -37,21 +38,24 @@ python main.py
 
 ### Docker Command Reference
 ```shell
-# Start full stack
+# Start full stack (database + API + frontend)
 docker compose up -d
 
-# Start only database
-docker compose up -d postgres
+# Start only specific services
+docker compose up -d postgres          # Database only
+docker compose up -d postgres app      # Database + API only
 
 # Stop services
 docker compose down
 
-# Rebuild and start
+# Rebuild and start (needed after code changes to Dockerfile, docker-compose, or adding/removing npm packages in the frontend)
 docker compose up -d --build
 
 # View logs
-docker compose logs app
-docker compose logs postgres
+docker compose logs app        # API logs
+docker compose logs frontend   # Frontend logs
+docker compose logs postgres   # Database logs
+docker compose logs -f         # Follow all logs in real-time
 ```
 
 ## Steps to setup the project

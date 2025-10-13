@@ -14,6 +14,7 @@ import { DetailView } from "../components/DetailView";
 import { getRfpDetail, downloadPdf, RfpDetailRow } from './lib/api';
 import { ScheduleCard } from "../components/ScheduleCard";
 import { MailingListCard } from "../components/MailingListCard";
+import { Notification, NotificationType } from "../components/Notification";
 
 // Format timestamp strings 
 function fmt(dt: string | null) {
@@ -45,9 +46,15 @@ export default function Home() {
   //  Detail view 
   const [selectedRow, setSelectedRow] = useState<RfpDetailRow | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  //  Notifications
+  const [notification, setNotification] = useState<{ message: string; type: NotificationType } | null>(null);
   
   const scheduleRef = useRef<HTMLDivElement>(null);
   const mailingRef = useRef<HTMLDivElement>(null);
+  
+  const showNotification = (message: string, type: NotificationType) => {
+    setNotification({ message, type });
+  };
   
   // Fetch current RFP rows (limit 500)
   const load = async () => {
@@ -68,9 +75,13 @@ export default function Home() {
     (async () => {
       try {
         const res = await getSchedule();
-        setSchedule(res.data);
+        setSchedule(res.data); // Will be null if 404
+        if (res.data === null) {
+          showNotification("No schedule is currently set. Please create a schedule to enable automated runs.", "warning");
+        }
       } catch (e) {
-        console.error("Failed to load schedule", e);
+        // Only log unexpected errors
+        console.error("Unexpected error loading schedule", e);
       }
       try {
         const m = await getEmailSettings();
@@ -86,7 +97,7 @@ export default function Home() {
     setRunning(true);
     try {
       const res = await triggerScrape(true, true);
-      alert(`Scrape complete. Found ${res.data.new_count} new RFPs.`);
+      showNotification(`Scrape complete. Found ${res.data.new_count} new RFPs.`, "success");
       await load();
     } finally {
       setRunning(false);
@@ -111,12 +122,12 @@ export default function Home() {
       const refreshed = await getSchedule();
       setSchedule(refreshed.data);
       setShowSchedule(false);
-      alert("Schedule updated successfully!");
+      showNotification("Schedule updated successfully!", "success");
     } catch (error: any) {
       const detail = error?.response?.data ?? error?.message ?? "Unknown error";
       const msg = typeof detail === "string" ? detail : JSON.stringify(detail);
       console.error("Schedule update error:", msg);
-      alert("Failed to update schedule: " + msg);
+      showNotification("Failed to update schedule: " + msg, "error");
     } finally {
       setScheduling(false);
     }
@@ -128,8 +139,9 @@ export default function Home() {
     try {
       const res = await clearSchedule();
       setSchedule(res.data);
+      showNotification("Schedule cleared successfully", "success");
     } catch (error: any) {
-      alert("Failed to clear schedule: " + (error?.response?.data?.detail ?? error?.message));
+      showNotification("Failed to clear schedule: " + (error?.response?.data?.detail ?? error?.message), "error");
     } finally {
       setScheduling(false);
     }
@@ -202,7 +214,7 @@ export default function Home() {
       const res = await getRfpDetail(hash);
       setSelectedRow(res.data);
     } catch (error) {
-      alert('Failed to load details');
+      showNotification('Failed to load details', 'error');
     } finally {
       setLoadingDetail(false);
     }
@@ -222,8 +234,9 @@ export default function Home() {
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
+      showNotification('PDF downloaded successfully', 'success');
     } catch (error) {
-      alert('Failed to download PDF');
+      showNotification('Failed to download PDF', 'error');
     }
   };
 
@@ -343,6 +356,14 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6 space-y-8">
+      {notification && createPortal(
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          onClose={() => setNotification(null)}
+        />,
+        document.body
+      )}
       <header className="flex items-center justify-between bg-gray-800/60 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 shadow-lg">
         <h1 className="text-3xl font-bold text-white">SmartMatch Admin Console</h1>
         <div className="flex items-center gap-3"> 
@@ -390,7 +411,7 @@ export default function Home() {
                   setMailing(m.data);
                   setShowMailing(true);
                 } catch (e) {
-                  alert("Failed to load mailing lists");
+                  showNotification("Failed to load mailing lists", "error");
                 }
               }}
               className="rounded-lg bg-teal-600/80 text-white border border-teal-500/50 px-4 py-2 hover:bg-teal-500/90 hover:border-teal-400/70 active:bg-teal-700/90 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md"
@@ -471,3 +492,4 @@ export default function Home() {
     </main>
   );
 }
+/* test change */

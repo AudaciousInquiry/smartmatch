@@ -7,7 +7,17 @@ const api = axios.create({
 export const listRfps = (params?: { q?: string; limit?: number; offset?: number; sort?: string; order?: "asc" | "desc" }) =>
   api.get<RfpRow[]>("/rfps", { params });
 
-export const getSchedule = () => api.get("/schedule");
+export const getSchedule = async () => {
+  try {
+    return await api.get("/schedule");
+  } catch (e: any) {
+    if (e?.response?.status === 404) {
+      // Gracefully handle no schedule set
+      return { data: null };
+    }
+    throw e;
+  }
+};
 export const updateSchedule = (data: {
   enabled: boolean;
   interval_hours: number;
