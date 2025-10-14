@@ -70,62 +70,195 @@ docker compose logs -f         # Follow all logs in real-time
   - Note: Do NOT commit secret values to the .env.template file, only commit them to the local hidden .env file 
 - Run "python main.py" to start the application.
 
-Commands
-python main.py  Run application with no emailing, just command line logging
+## Common Commands
 
-Flags
---email Sends the user email after scraping if a new RFP was found
---debug-email Sends the debug email, containing all the logs from a run. Sends even if nothing new was found
---list Lists everything stored in the DB
---clear Clears everything stored in the DB 
+### Run the Main Application
+```shell
+python main.py
+```
+Runs the application with no emailing, just command line logging.
 
+### Flags for main.py
+- `--email` — Sends the user email after scraping if a new RFP was found
+- `--debug-email` — Sends the debug email, containing all the logs from a run. Sends even if nothing new was found
+- `--list` — Lists everything stored in the DB
+- `--clear` — Clears everything stored in the DB
 
-Troubleshooting
+**Examples:**
+```shell
+python main.py --email
+python main.py --debug-email
+python main.py --list
+python main.py --clear
+```
 
+---
 
-PGVECTOR NOT INSTALLED
-If the following error is encountered
+## Troubleshooting
 
+### PGVECTOR NOT INSTALLED
+If you see an error like:
+
+```
 DETAIL:  Could not open extension control file "C:/Program Files/PostgreSQL/17/share/extension/vector.control": No such file or directory.
 HINT:  The extension must first be installed on the system where PostgreSQL is running.
-[SQL: SELECT pg_advisory_xact_lock(1573678846307946496);CREATE EXTENSION IF NOT EXISTS vector;]
+[SQL: SELECT pg_advisory_xact_lock(...); CREATE EXTENSION IF NOT EXISTS vector;]
+```
 
-This is likely because you are attempting to connect to a native Windows PostgreSQL install instead of the docker container that has the pgvector enabled image because the native windows install bound to the port first.
+This usually means you are connecting to a native Windows PostgreSQL install instead of the Docker container (which has pgvector enabled). The native install may have bound to the port first.
 
-To fix, run the following commands in Powershell  (As admin)
-Stop-Service -Name postgresql-x64-17 -Force
-cd C:\Users\brocke\Documents\GitHub\SmartMatchAI
-docker-compose down
-docker volume rm smartmatchai_pgdata
-docker-compose up --build
+**To fix:**
+1. Stop the native Windows PostgreSQL service:
+   ```powershell
+   Stop-Service -Name postgresql-x64-17 -Force
+   ```
+2. Bring down Docker and remove the old volume:
+   ```shell
+   docker-compose down
+   docker volume rm smartmatchai_pgdata
+   docker-compose up --build
+   ```
 
+### EXECUTION POLICIES ERROR ON VIRTUAL ENVIRONMENT CREATION
+If you see an error like:
 
-EXECUTION POLICIES ERROR ON VIRTUAL ENVIRONMENT CREATION
+```
+.venv\Scripts\Activate.ps1 cannot be loaded because running scripts is disabled on this system.
+For more information, see about_Execution_Policies at https:/go.microsoft.com/fwlink/?LinkID=135170.
+```
 
-If this error is encountered
-
-C:\Users\brocke\Documents\GitHub\SmartMatchAI\.venv\Scripts\Activate.ps1 cannot be loaded because        
-running scripts is disabled on this system. For more information, see about_Execution_Policies at        
-https:/go.microsoft.com/fwlink/?LinkID=135170.
-At line:1 ch
-
-Simply run this command
-
+**To fix:**
+Run this command in PowerShell:
+```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+```
 
+### CREDENTIALS ISSUE
+If you see an error like:
 
+```
+Exception: Failed to create vector extension: (psycopg.OperationalError) connection failed: ... port 5432 failed: FATAL:  password authentication failed for user "postgres"
+```
 
-CREDENTIALS ISSUE
+**To fix:**
+- Ensure the `PGVECTOR_CONNECTION` environment variable is set in your local `.env` file, for example:
+  ```env
+  PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5433/smartmatch
+  ```
+- Make sure you are in your virtual environment:
+  ```shell
+  .\.venv\Scripts\Activate.ps1
+  ```
 
-If getting this
+## All Available Scripts and Commands
 
-Exception: Failed to create vector extension: (psycopg.OperationalError) connection failed: :1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+### main.py - Main RFP Scraping Script
+The primary script for scraping RFPs from configured websites and managing the database.
 
-Ensure the PGVECTOR_CONNECTION environment variable is set in you local .env file like so:
-PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5433/smartmatch
+```shell
+# Run basic scrape (no emails)
+python main.py
 
-Also ensure you're in virtual env with
-.\.venv\Scripts\Activate.ps1  
+# Run scrape and send email if new RFPs found
+python main.py --email
+
+# Run scrape and send debug email with full logs
+python main.py --debug-email
+
+# Send both emails
+python main.py --email --debug-email
+
+# List all processed RFPs in the database
+python main.py --list
+
+# List all excluded RFPs (expired/out-of-scope/etc.)
+python main.py --list-exclusions
+
+# Clear all processed RFPs from database
+python main.py --clear
+
+# Clear all excluded RFPs from database
+python main.py --clear-exclusions
+
+# Clear/reset the scheduled run configuration
+python main.py --clear-schedule
+```
+
+**Available Arguments:**
+- `--email` - Sends email to main recipients if new RFPs are found
+- `--debug-email` - Sends debug email with full logs to debug recipients
+- `--list` - Display all processed RFPs from the database
+- `--list-exclusions` - Display all excluded RFPs (expired/out-of-scope)
+- `--clear` - Remove all processed RFPs from the database
+- `--clear-exclusions` - Remove all excluded RFPs from the database
+- `--clear-schedule` - Reset the scrape schedule configuration
+
+---
+
+### bedrock_scrape.py - Single URL RFP Probe
+LLM-driven tool to analyze a single URL for RFP listings. Useful for testing or one-off scrapes.
+
+```shell
+# Analyze a single URL for RFPs
+python bedrock_scrape.py --url "https://example.gov/rfp-opportunities"
+
+# Specify a custom site name
+python bedrock_scrape.py --url "https://example.gov/rfps" --site "Example Gov"
+
+# Advanced: Limit text analysis
+python bedrock_scrape.py --url "https://example.gov/rfps" --max-text 8000
+
+# Advanced: Limit number of items to process
+python bedrock_scrape.py --url "https://example.gov/rfps" --max-items 10
+```
+
+**Common Arguments:**
+- `--url` (required) - The URL to analyze for RFP listings
+- `--site` - Custom site name to store (defaults to domain name)
+- `--max-text` - Maximum characters to analyze per page (default: 16000)
+- `--max-items` - Maximum number of RFP items to process (default: unlimited)
+- `--max-links` - Maximum number of links to analyze (default: 400)
+- `--max-hops` - Maximum navigation depth (default: 5)
+
+**Advanced Arguments:**
+- `--timeout-read` - Read timeout in seconds (default: 60.0)
+- `--timeout-connect` - Connection timeout in seconds (default: 10.0)
+- `--retries` - Number of retry attempts (default: 2)
+- `--temperature` - LLM temperature setting (default: 0.0)
+- `--model-id` - Override default LLM model
+- `--region` - AWS region override
+- `--log-bedrock-raw` - Enable detailed LLM response logging
+- `--log-bedrock-raw-chars` - Characters to log from LLM responses (default: 2000)
+
+---
+
+## Running Python Scripts: Docker vs Local
+
+### Running a Script Inside Docker
+All dependencies from `requirements.txt` are installed in the Docker container. To run a script (e.g., `bedrock_scrape.py`) inside the container, use:
+
+```shell
+docker compose run --rm app python bedrock_scrape.py --url "https://www.tn.gov/generalservices/procurement/central-procurement-office--cpo-/supplier-information/request-for-proposals--rfp--opportunities1"
+```
+- This ensures all dependencies are available.
+- Replace the script name and arguments as needed.
+
+### Running a Script Locally
+If you want to run scripts directly on your machine (outside Docker), you must install all dependencies yourself:
+
+```shell
+# (Recommended) Create and activate a virtual environment first
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run your script
+python bedrock_scrape.py --url "https://www.tn.gov/generalservices/procurement/central-procurement-office--cpo-/supplier-information/request-for-proposals--rfp--opportunities1"
+```
+- If you see `ModuleNotFoundError`, it means you need to install the missing package (see above)
+- Keeping your local environment in sync with Docker is your responsibility if you choose this route
 
 
 
