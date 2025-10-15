@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import { listRfps, triggerScrape, type RfpRow, updateSchedule, getSchedule, clearSchedule, getEmailSettings, setEmailSettings } from "./lib/api";
 import { 
   RefreshIcon, 
@@ -10,8 +11,6 @@ import {
   TrashIcon, 
   SortIcon 
 } from "../components/Icons";
-import { DetailView } from "../components/DetailView";
-import { getRfpDetail, downloadPdf, RfpDetailRow } from './lib/api';
 import { ScheduleCard } from "../components/ScheduleCard";
 import { MailingListCard } from "../components/MailingListCard";
 import { Notification, NotificationType } from "../components/Notification";
@@ -25,6 +24,8 @@ function fmt(dt: string | null) {
 }
 
 export default function Home() {
+  const router = useRouter();
+  
   //  RFP listing state 
   const [rows, setRows] = useState<RfpRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -43,9 +44,6 @@ export default function Home() {
   const [sortField, setSortField] = useState<keyof RfpRow>("processed_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [filterText, setFilterText] = useState("");
-  //  Detail view 
-  const [selectedRow, setSelectedRow] = useState<RfpDetailRow | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
   //  Notifications
   const [notification, setNotification] = useState<{ message: string; type: NotificationType } | null>(null);
   
@@ -207,37 +205,9 @@ export default function Home() {
     });
   }, [rows, filterText, sortField, sortDirection]);
 
-  // Load full detail (and switch panel) when selecting a row
-  const handleRowClick = async (hash: string) => {
-    setLoadingDetail(true);
-    try {
-      const res = await getRfpDetail(hash);
-      setSelectedRow(res.data);
-    } catch (error) {
-      showNotification('Failed to load details', 'error');
-    } finally {
-      setLoadingDetail(false);
-    }
-  };
-
-  // Request PDF bytes from DB and trigger download
-  const handleDownloadPdf = async () => {
-    if (!selectedRow) return;
-    
-    try {
-      const res = await downloadPdf(selectedRow.hash);
-      const blob = new Blob([res.data], { type: 'application/pdf' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${selectedRow.title}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      showNotification('PDF downloaded successfully', 'success');
-    } catch (error) {
-      showNotification('Failed to download PDF', 'error');
-    }
+  // Navigate to detail view when clicking a row
+  const handleRowClick = (hash: string) => {
+    router.push(`/rfp/${hash}`);
   };
 
   // Memoized tbody element (depends on filtered list + click handler)
@@ -445,19 +415,11 @@ export default function Home() {
         </div>
       </header>
 
-  {selectedRow ? (
-        <DetailView 
-          data={selectedRow}
-          onBack={() => setSelectedRow(null)}
-          onDownload={handleDownloadPdf}
-        />
-      ) : (
-        <>
-          <div className="bg-gray-800/40 rounded-xl p-6 border border-gray-700/50 shadow-lg space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-white mb-1">Find Opportunities</h2>
-                <p className="text-sm text-gray-400">Search and filter through current results</p>
+      <div className="bg-gray-800/40 rounded-xl p-6 border border-gray-700/50 shadow-lg space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-white mb-1">Find Opportunities</h2>
+            <p className="text-sm text-gray-400">Search and filter through current results</p>
               </div>
               <div className="flex items-center">
                 {filterText && (
@@ -481,14 +443,12 @@ export default function Home() {
                 className="flex-1 max-w-md rounded-lg bg-gray-700/60 text-gray-200 placeholder-gray-400 border border-gray-600/50 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500/50 backdrop-blur-sm transition-all duration-200"
               />
               <div className="text-sm text-gray-400">
-                Displaying {filteredAndSortedRows.length} of {rows.length} opportunities
-              </div>
-            </div>
+            Displaying {filteredAndSortedRows.length} of {rows.length} opportunities
           </div>
+        </div>
+      </div>
 
-          {table}
-        </>
-      )}
+      {table}
     </main>
   );
 }
