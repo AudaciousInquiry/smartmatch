@@ -51,12 +51,16 @@ docker compose down
 # Rebuild and start (needed after code changes to Dockerfile, docker-compose, or adding/removing npm packages in the frontend)
 docker compose up -d --build
 
-# View logs
-docker compose logs app        # API logs
-docker compose logs frontend   # Frontend logs
-docker compose logs postgres   # Database logs
-docker compose logs -f         # Follow all logs in real-time
+# View logs (basic)
+docker compose logs app                      # API logs
+docker compose logs frontend                 # Frontend logs
+docker compose logs postgres                 # Database logs
+docker compose logs -f                       # Follow all logs in real-time
+docker compose logs app --tail 20 --follow   # Most useful: last 20 lines + follow
 ```
+
+For comprehensive Docker logging commands and scenarios, see [Docker Logging Guide](docker-logging.md).
+
 
 ## Steps to setup the project
 - Download python 3.12.0 (https://www.python.org/downloads/release/python-3120/). Note: latest version 3.13 is causing conflicts for some libraries, so for now you need python 3.12

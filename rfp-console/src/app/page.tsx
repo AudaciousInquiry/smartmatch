@@ -9,7 +9,9 @@ import {
   CalendarIcon, 
   LightningIcon, 
   TrashIcon, 
-  SortIcon 
+  SortIcon,
+  GlobeIcon,
+  MailIcon
 } from "../components/Icons";
 import { ScheduleCard } from "../components/ScheduleCard";
 import { MailingListCard } from "../components/MailingListCard";
@@ -386,7 +388,10 @@ export default function Home() {
               }}
               className="rounded-lg bg-teal-600/80 text-white border border-teal-500/50 px-4 py-2 hover:bg-teal-500/90 hover:border-teal-400/70 active:bg-teal-700/90 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md"
             >
-              Mailing Lists
+              <span className="flex items-center gap-2">
+                <MailIcon />
+                Mailing Lists
+              </span>
             </button>
             {showMailing && mailing && createPortal(
               <div ref={mailingRef} className="fixed top-20 right-6 z-[99999]">
@@ -402,6 +407,15 @@ export default function Home() {
               document.body
             )}
           </div>
+          <button
+            onClick={() => router.push('/settings/websites')}
+            className="rounded-lg bg-orange-600/80 text-white border border-orange-500/50 px-4 py-2 hover:bg-orange-500/90 hover:border-orange-400/70 active:bg-orange-700/90 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md"
+          >
+            <span className="flex items-center gap-2">
+              <GlobeIcon />
+              Manage Websites
+            </span>
+          </button>
           <button
             onClick={onRunNow}
             disabled={running}

@@ -33,20 +33,17 @@ export function DetailView({ data, onBack, onDownload }: DetailViewProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between z-[1000]"> {}
-  <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="rounded-lg bg-gray-600/70 text-gray-200 border border-gray-500/50 px-3 py-3 hover:bg-gray-500/60 hover:text-white hover:border-gray-400/50 active:bg-gray-700/70 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md flex items-center gap-2"
-          >
-            <BackIcon />
-            Back to List
-          </button>
-          
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-white">RFP Details</h2>
+          <p className="text-sm text-gray-400 mt-1">View detailed information about this opportunity</p>
+        </div>
+        <div className="flex items-center gap-3">
           {data.has_pdf && (
             <button
               onClick={onDownload}
-              className="rounded-lg bg-blue-600/70 text-gray-200 border border-blue-500/50 px-3 py-3 hover:bg-blue-500/60 hover:text-white hover:border-blue-400/50 active:bg-blue-700/70 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md flex items-center gap-2"
+              className="rounded-lg bg-blue-600/80 text-white border border-blue-500/50 px-4 py-2 hover:bg-blue-500/90 hover:border-blue-400/70 active:bg-blue-700/90 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md flex items-center gap-2"
             >
               <DownloadIcon />
               Download PDF
@@ -56,10 +53,18 @@ export function DetailView({ data, onBack, onDownload }: DetailViewProps) {
           <button
             onClick={onDelete}
             disabled={deleting}
-            className="rounded-lg bg-red-600/70 text-gray-200 border border-red-500/50 px-3 py-3 hover:bg-red-500/60 hover:text-white hover:border-red-400/50 active:bg-red-700/70 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md flex items-center gap-2 disabled:opacity-60"
+            className="rounded-lg bg-red-600/80 text-white border border-red-500/50 px-4 py-2 hover:bg-red-500/90 hover:border-red-400/70 active:bg-red-700/90 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 backdrop-blur-sm shadow-md flex items-center gap-2"
             title="Delete this RFP"
           >
             {deleting ? 'Deleting…' : 'Delete'}
+          </button>
+          
+          <button
+            onClick={onBack}
+            className="rounded-lg bg-gray-700/70 text-gray-200 border border-gray-600/50 px-4 py-2 hover:bg-gray-600/70 hover:text-white hover:border-gray-500/70 active:bg-gray-800/80 active:scale-95 transition-all duration-200 backdrop-blur-sm shadow-md flex items-center gap-2"
+          >
+            <BackIcon />
+            Back to Main
           </button>
         </div>
       </div>

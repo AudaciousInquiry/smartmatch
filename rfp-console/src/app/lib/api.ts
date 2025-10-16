@@ -43,6 +43,18 @@ export const downloadPdf = (hash: string) =>
 export const deleteRfp = (hash: string) =>
   api.delete(`/rfps/${hash}`);
 
+export const getWebsiteSettings = () =>
+  api.get<WebsiteSetting[]>('/website-settings');
+
+export const addWebsite = (data: { name: string; url: string; enabled?: boolean }) =>
+  api.post<WebsiteSetting>('/website-settings', data);
+
+export const updateWebsite = (id: number, data: { name?: string; url?: string; enabled?: boolean }) =>
+  api.put<WebsiteSetting>(`/website-settings/${id}`, data);
+
+export const deleteWebsite = (id: number) =>
+  api.delete(`/website-settings/${id}`);
+
 export type RfpRow = {
   hash: string;
   title: string;
@@ -55,4 +67,13 @@ export type RfpDetailRow = RfpRow & {
   detail_content: string | null;
   ai_summary: string | null;
   has_pdf: boolean;
+};
+
+export type WebsiteSetting = {
+  id: number;
+  name: string;
+  url: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
 };

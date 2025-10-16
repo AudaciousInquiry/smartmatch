@@ -188,7 +188,17 @@ def main():
 
     new_rfps = []
     with engine.begin() as conn:
-        for site in ConfigurationValues.get_websites():
+        # Fetch enabled websites from DB
+        websites_result = conn.execute(
+            text("SELECT name, url FROM website_settings WHERE enabled = true ORDER BY created_at")
+        ).fetchall()
+        
+        websites = [{"name": row[0], "url": row[1]} for row in websites_result]
+        
+        if not websites:
+            logger.warning("No enabled websites found in database")
+        
+        for site in websites:
             site_name = site['name']
             url = site['url']
             logger.info(f"Processing listing via Bedrock probe: {site_name} -> {url}")

@@ -69,6 +69,16 @@ email_settings = Table(
     Column("updated_at", DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow),
 )
 
+website_settings = Table(
+    "website_settings", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("name", String, nullable=False),
+    Column("url", String, nullable=False),
+    Column("enabled", Boolean, nullable=False, default=True),
+    Column("created_at", DateTime, default=datetime.datetime.utcnow),
+    Column("updated_at", DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow),    
+)
+
 processed_rfps = Table(
     "processed_rfps", metadata,
     Column("hash", String, primary_key=True),
@@ -128,6 +138,19 @@ class EmailSettingsUpdate(BaseModel):
     main_recipients: List[EmailStr]
     debug_recipients: List[EmailStr]
 
+class WebsiteCreate(BaseModel):
+    # Payload for creating a new website to scrape
+    name: str = Field(min_length=1)
+    url: str = Field(min_length=1)
+    enabled: bool = True
+
+class WebsiteUpdate(BaseModel):
+    # Payload for updating an existing website
+    name: Optional[str] = Field(None, min_length=1)
+    url: Optional[str] = Field(None, min_length=1)
+    enabled: Optional[bool] = None
+
+# Creates the scraping schedule
 def get_or_create_config(conn):
     # Ensure scrape_config singleton row exists; return row.
     q = select(scrape_config).where(scrape_config.c.id == "singleton")
@@ -145,6 +168,7 @@ def get_or_create_config(conn):
         row = conn.execute(q).first()
     return row
 
+# Email settings for mail and debug recipients
 def get_or_create_email_settings(conn):
     # Ensure email_settings singleton row exists; return row.
     q = select(email_settings).where(email_settings.c.id == "singleton")
@@ -162,6 +186,7 @@ def get_or_create_email_settings(conn):
         row = conn.execute(q).first()
     return row
 
+# Returns RFPs in the DB
 @app.get("/rfps")
 def list_rfps(
     q: str = "", 
@@ -259,6 +284,101 @@ def update_schedule(payload: ScheduleUpdate):
             }
     except Exception as e:
         logger.exception("Failed to update schedule")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get('/website-settings')
+def get_website_settings():
+    # Using a SQL Query, returns a JSON array of website_settings like objects of all configured websites to scrape
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(website_settings).order_by(website_settings.c.created_at.asc())
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+@app.post('/website-settings')
+def add_website(payload: WebsiteCreate):
+    # Add a new website to the DB to scrape
+    try:
+        now = datetime.datetime.utcnow()
+        with engine.begin() as conn:
+            result = conn.execute(
+                insert(website_settings).values(
+                    name=payload.name,
+                    url=payload.url,
+                    enabled=payload.enabled,
+                    created_at=now,
+                    updated_at=now,
+                ).returning(website_settings.c.id)
+            )
+            new_id = result.scalar()
+            
+            # Fetch the created row
+            row = conn.execute(
+                select(website_settings).where(website_settings.c.id == new_id)
+            ).mappings().first()
+            
+        return dict(row)
+    except Exception as e:
+        logger.exception("Failed to add website")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put('/website-settings/{website_id}')
+def update_website(website_id: int, payload: WebsiteUpdate):
+    # Update an existing website configuration in the DB
+    try:
+        with engine.begin() as conn:
+            # Check if exists
+            existing = conn.execute(
+                select(website_settings).where(website_settings.c.id == website_id)
+            ).first()
+            
+            if not existing:
+                raise HTTPException(status_code=404, detail="Website not found")
+            
+            # Build update dict with only provided fields
+            update_data = {"updated_at": datetime.datetime.utcnow()}
+            if payload.name is not None:
+                update_data["name"] = payload.name
+            if payload.url is not None:
+                update_data["url"] = payload.url
+            if payload.enabled is not None:
+                update_data["enabled"] = payload.enabled
+            
+            conn.execute(
+                update(website_settings)
+                .where(website_settings.c.id == website_id)
+                .values(**update_data)
+            )
+            
+            # Fetch updated row
+            row = conn.execute(
+                select(website_settings).where(website_settings.c.id == website_id)
+            ).mappings().first()
+            
+        return dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to update website")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete('/website-settings/{website_id}')
+def delete_website(website_id: int):
+    # Delete a website from the DB scraping list
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(
+                delete(website_settings).where(website_settings.c.id == website_id)
+            )
+            
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Website not found")
+            
+        return {"deleted": True, "id": website_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete website")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/email-settings")
