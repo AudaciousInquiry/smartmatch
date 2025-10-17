@@ -32,16 +32,16 @@ class ConfigurationValues:
 #   def get_websites():
 #       return [
 #           {"name": "cdcfoundation", "url": "https://www.cdcfoundation.org/request-for-proposals"},
-#           {"name": "nnphi", "url": "https://nnphi.org/news/funding-announcements/"},
-#           {"name": "astho", "url": "https://www.astho.org/members/opportunities/"},
+#           {"name": "nnphi", "url": "https://nnphi.org/news/funding-announcements"},
+#           {"name": "astho", "url": "https://www.astho.org/members/opportunities"},
 #           {"name": "cste", "url": "https://resources.cste.org/rfp/home/rfp"},
 #           {"name": "aira", "url": "https://www.immregistries.org/opportunities"},
-#           {"name": "ny", "url": "https://www.health.ny.gov/funding/"},
+#           {"name": "ny", "url": "https://www.health.ny.gov/funding"},
 #           {"name": "md", "url": "https://health.maryland.gov/procumnt/pages/procopps.aspx#:~:text=Solicitation%20Title,Date%2FTime%206%2F14%2F2023%202%3A00%20PM%20Attachment"},
 #           {"name": "tn", "url": "https://www.tn.gov/generalservices/procurement/central-procurement-office--cpo-/supplier-information/request-for-proposals--rfp--opportunities1"},
 #           {"name": "cdcfoundation", "url": "https://web.archive.org/web/20250113003138/https://www.cdcfoundation.org/request-for-proposals"},
 #           {"name": "nnphi", "url": "nothing"},
-#           {"name": "astho", "url": "https://web.archive.org/web/20250118131712/https://www.astho.org/members/opportunities/"},
+#           {"name": "astho", "url": "https://web.archive.org/web/20250118131712/https://www.astho.org/members/opportunities"},
 #           {"name": "cste", "url": "https://web.archive.org/web/20200424184250/https://www.cste.org/page/RFP"},
 #           {"name": "aira", "url": "https://www.immregistries.org/opportunities"},
 #       ]
