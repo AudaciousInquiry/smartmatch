@@ -92,6 +92,12 @@ processed_rfps = Table(
 )
 
 def init_db():
+    """Initialize database schema and apply any necessary migrations."""
+    # First, ensure all tables exist
+    metadata.create_all(engine)
+    
+    # Then run any ALTER statements for schema evolution
+    # (ADD COLUMN IF NOT EXISTS is safe to run even if columns already exist)
     with engine.begin() as conn:
         conn.execute(text("""
             ALTER TABLE public.processed_rfps 
@@ -100,21 +106,8 @@ def init_db():
             ADD COLUMN IF NOT EXISTS pdf_content BYTEA;
         """))
 
-app = FastAPI(
-    title="SmartMatch Admin API",
-    lifespan=lifespan
-)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+# Initialize database on startup
 init_db()
-
-metadata.create_all(engine)
 
 def get_sched_tz() -> datetime.tzinfo:
     # Resolve timezone for scheduling logic honoring env overrides.
