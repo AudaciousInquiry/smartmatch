@@ -68,6 +68,27 @@ For comprehensive Docker logging commands and scenarios, see [Docker Logging Gui
   - Note: Do NOT commit secret values to the .env.template file, only edit the local hidden .env file
 - Run "docker compose up" (this will create the database, backend, and frontend, and install all required software and dependencies)
 
+### (Optional) Final Step: Use VS Code Dev Containers for Development
+
+For the best experience with full intellisense and no local dependency management:
+
+1. Install the "Dev Containers" extension in VS Code.
+2. Run `docker compose up -d` first to start all services in the background. Note: If docker is already running from prior steps, that is also fine.
+3. Open the project folder in VS Code in a new window.
+4. Press `Ctrl+Shift+P` and select "Dev Containers: Reopen in Container".
+5. When prompted, choose which dev container config to use:
+   - **devcontainer-frontend.json** (Frontend - Node.js environment with npm and all frontend dependencies)
+   - **devcontainer-backend.json** (Backend - Python environment with all backend dependencies)
+6. VS Code will connect to the selected container and provide full intellisense, type checking, and terminal access.
+
+**When inside a Dev Container:**
+- You do NOT need to prefix commands with `docker compose exec` or similar. Just run `npm`, `python`, etc. directly in the VS Code terminal.
+- All dependencies are already installed in the container.
+- For full-stack development, open two VS Code windows—one connected to frontend and one to backend.
+- Ports are automatically forwarded (3000 for frontend, 8000 for API, 5432 for database).
+
+This approach keeps your local machine clean and ensures your dev environment matches production.
+
 ## Steps to setup a (mostly) local environment
 - Download python 3.12.0 (https://www.python.org/downloads/release/python-3120/)
   - Note: latest version 3.13 is causing conflicts for some libraries, so for now you need python 3.12
@@ -275,4 +296,4 @@ Exception: Failed to create vector extension: (psycopg.OperationalError) connect
   ```shell
   .\.venv\Scripts\Activate.ps1
   ```
-  
+
