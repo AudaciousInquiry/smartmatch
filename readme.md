@@ -72,20 +72,23 @@ For comprehensive Docker logging commands and scenarios, see [Docker Logging Gui
 
 For the best experience with full intellisense and no local dependency management:
 
-1. Install the "Dev Containers" extension in VS Code.
-2. Run `docker compose up -d` first to start all services in the background. Note: If docker is already running from prior steps, that is also fine.
-3. Open the project folder in VS Code in a new window.
-4. Press `Ctrl+Shift+P` and select "Dev Containers: Reopen in Container".
-5. When prompted, choose which dev container config to use:
-   - **devcontainer-frontend.json** (Frontend - Node.js environment with npm and all frontend dependencies)
-   - **devcontainer-backend.json** (Backend - Python environment with all backend dependencies)
-6. VS Code will connect to the selected container and provide full intellisense, type checking, and terminal access.
+1. Open VS Code and install the "Dev Containers" extension if not pre-installed.
+2. Open the project folder.
+3. Click the "Open a Remote Window" button in the bottom left (or press `Ctrl+Shift+P` and select "Dev Containers: Reopen in Container").
+5. When prompted, choose which dev container to use:
+   - **SmartMatchAI Frontend** (Node.js environment with npm and all frontend dependencies)
+   - **SmartMatchAI Backend** (Python environment with all backend dependencies)
+6. VS Code will connect to the selected container and provide full intellisense, type checking, and terminal access. Note: You can run both environments at the same time in separate windows.
 
 **When inside a Dev Container:**
-- You do NOT need to prefix commands with `docker compose exec` or similar. Just run `npm`, `python`, etc. directly in the VS Code terminal.
+- You do NOT need to prefix commands with `docker compose exec`. Just run `npm`, `python`, etc. directly in the VS Code terminal.
 - All dependencies are already installed in the container.
 - For full-stack development, open two VS Code windows—one connected to frontend and one to backend.
 - Ports are automatically forwarded (3000 for frontend, 8000 for API, 5432 for database).
+
+**Dev Container Structure:**
+- `.devcontainer/frontend/devcontainer.json` - Frontend development environment
+- `.devcontainer/backend/devcontainer.json` - Backend development environment
 
 This approach keeps your local machine clean and ensures your dev environment matches production.
 

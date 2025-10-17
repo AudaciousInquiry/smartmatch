@@ -1,6 +1,6 @@
 {
   "name": "SmartMatchAI Frontend",
-  "dockerComposeFile": "../docker-compose.yml",
+  "dockerComposeFile": "../../docker-compose.yml",
   "service": "frontend",
   "workspaceFolder": "/app",
   "customizations": {
