@@ -29,7 +29,7 @@ python main.py
 npm run dev
 
 # API (local Python)
-python -m uvicorn service:app --reload --port 8000 
+python -m uvicorn service:app --reload --port 8000
 
 # CLI (local Python)
 python main.py
@@ -61,18 +61,28 @@ docker compose logs app --tail 20 --follow   # Most useful: last 20 lines + foll
 
 For comprehensive Docker logging commands and scenarios, see [Docker Logging Guide](docker-logging.md).
 
+## Steps to setup a fully containerized environment
+- Download, install, and open Docker (https://docs.docker.com/get-started/get-docker/)
+- Clone the repo
+- Copy environment variables from the .env.template to a .env file that you create (it is git-ignored) and add missing values to your personal .env file
+  - Note: Do NOT commit secret values to the .env.template file, only edit the local hidden .env file
+- Run "docker compose up" (this will create the database, backend, and frontend, and install all required software and dependencies)
 
-## Steps to setup the project
-- Download python 3.12.0 (https://www.python.org/downloads/release/python-3120/). Note: latest version 3.13 is causing conflicts for some libraries, so for now you need python 3.12
-- Download postgres latest https://www.postgresql.org/download/ and setup postgresql.
-- Download Docker (https://docs.docker.com/get-started/get-docker/) and install docker.
-- Run docker-compose up (this will create the container for the postgres vector database)
+## Steps to setup a (mostly) local environment
+- Download python 3.12.0 (https://www.python.org/downloads/release/python-3120/)
+  - Note: latest version 3.13 is causing conflicts for some libraries, so for now you need python 3.12
+- Download and install node, npm, and nvm
+- Download and install Postgresql latest https://www.postgresql.org/download/
+- Download, install, and open Docker (https://docs.docker.com/get-started/get-docker/)
+- Clone the repo
+- Copy environment variables from the .env.template to a .env file that you create (it is git-ignored) and add missing values to your personal .env file
+  - Note: Do NOT commit secret values to the .env.template file, only edit the local hidden .env file
+- Run "docker compose up postgres" (this will create the container for the postgres vector database)
 - Verify the container is up by running "docker ps"
 - Create a venv and activate it so we install our dependencies in the right (local) location
-- Install dependencies by using pip install -r requirements.txt
-- Copy environment variables from the .env.template to a .env file that you create (it is git-ignored) and add values to your personal .env file
-  - Note: Do NOT commit secret values to the .env.template file, only commit them to the local hidden .env file 
-- Run "python main.py" to start the application.
+- Install dependencies by using "pip install -r requirements.txt"
+- Run "python main.py" to start the application or use uvicorn "python -m uvicorn service:app --reload --port 8000" to run the API
+- Run "npm run dev" to run the frontend (ensure the API is running if using the frontend)
 
 ## Common Commands
 
@@ -97,62 +107,6 @@ python main.py --clear
 ```
 
 ---
-
-## Troubleshooting
-
-### PGVECTOR NOT INSTALLED
-If you see an error like:
-
-```
-DETAIL:  Could not open extension control file "C:/Program Files/PostgreSQL/17/share/extension/vector.control": No such file or directory.
-HINT:  The extension must first be installed on the system where PostgreSQL is running.
-[SQL: SELECT pg_advisory_xact_lock(...); CREATE EXTENSION IF NOT EXISTS vector;]
-```
-
-This usually means you are connecting to a native Windows PostgreSQL install instead of the Docker container (which has pgvector enabled). The native install may have bound to the port first.
-
-**To fix:**
-1. Stop the native Windows PostgreSQL service:
-   ```powershell
-   Stop-Service -Name postgresql-x64-17 -Force
-   ```
-2. Bring down Docker and remove the old volume:
-   ```shell
-   docker-compose down
-   docker volume rm smartmatchai_pgdata
-   docker-compose up --build
-   ```
-
-### EXECUTION POLICIES ERROR ON VIRTUAL ENVIRONMENT CREATION
-If you see an error like:
-
-```
-.venv\Scripts\Activate.ps1 cannot be loaded because running scripts is disabled on this system.
-For more information, see about_Execution_Policies at https:/go.microsoft.com/fwlink/?LinkID=135170.
-```
-
-**To fix:**
-Run this command in PowerShell:
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
-```
-
-### CREDENTIALS ISSUE
-If you see an error like:
-
-```
-Exception: Failed to create vector extension: (psycopg.OperationalError) connection failed: ... port 5432 failed: FATAL:  password authentication failed for user "postgres"
-```
-
-**To fix:**
-- Ensure the `PGVECTOR_CONNECTION` environment variable is set in your local `.env` file, for example:
-  ```env
-  PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5433/smartmatch
-  ```
-- Make sure you are in your virtual environment:
-  ```shell
-  .\.venv\Scripts\Activate.ps1
-  ```
 
 ## All Available Scripts and Commands
 
@@ -200,7 +154,7 @@ python main.py --clear-schedule
 ---
 
 ### bedrock_scrape.py - Single URL RFP Probe
-LLM-driven tool to analyze a single URL for RFP listings. Useful for testing or one-off scrapes.
+Debug tool to analyze a single URL for RFP listings. Useful for testing different parameters or one-off scrapes.
 
 ```shell
 # Analyze a single URL for RFPs
@@ -264,5 +218,61 @@ python bedrock_scrape.py --url "https://www.tn.gov/generalservices/procurement/c
 - If you see `ModuleNotFoundError`, it means you need to install the missing package (see above)
 - Keeping your local environment in sync with Docker is your responsibility if you choose this route
 
+---
 
+## Troubleshooting
 
+### PGVECTOR NOT INSTALLED
+If you see an error like:
+
+```
+DETAIL:  Could not open extension control file "C:/Program Files/PostgreSQL/17/share/extension/vector.control": No such file or directory.
+HINT:  The extension must first be installed on the system where PostgreSQL is running.
+[SQL: SELECT pg_advisory_xact_lock(...); CREATE EXTENSION IF NOT EXISTS vector;]
+```
+
+This usually means you are connecting to a native Windows PostgreSQL install instead of the Docker container (which has pgvector enabled). The native install may have bound to the port first.
+
+**To fix:**
+1. Stop the native Windows PostgreSQL service:
+   ```powershell
+   Stop-Service -Name postgresql-x64-17 -Force
+   ```
+2. Bring down Docker and remove the old volume:
+   ```shell
+   docker-compose down
+   docker volume rm smartmatchai_pgdata
+   docker-compose up --build
+   ```
+
+### EXECUTION POLICIES ERROR ON VIRTUAL ENVIRONMENT CREATION
+If you see an error like:
+
+```
+.venv\Scripts\Activate.ps1 cannot be loaded because running scripts is disabled on this system.
+For more information, see about_Execution_Policies at https:/go.microsoft.com/fwlink/?LinkID=135170.
+```
+
+**To fix:**
+Run this command in PowerShell:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+```
+
+### CREDENTIALS ISSUE
+If you see an error like:
+
+```
+Exception: Failed to create vector extension: (psycopg.OperationalError) connection failed: ... port 5432 failed: FATAL:  password authentication failed for user "postgres"
+```
+
+**To fix:**
+- Ensure the `PGVECTOR_CONNECTION` environment variable is set in your local `.env` file, for example:
+  ```env
+  PGVECTOR_CONNECTION=postgresql+psycopg://postgres:test@localhost:5433/smartmatch
+  ```
+- Make sure you are in your virtual environment:
+  ```shell
+  .\.venv\Scripts\Activate.ps1
+  ```
+  
