@@ -92,12 +92,10 @@ processed_rfps = Table(
 )
 
 def init_db():
-    """Initialize database schema and apply any necessary migrations."""
-    # First, ensure all tables exist
+    # First, ensure all tables exist, so we are prepared on first run
     metadata.create_all(engine)
     
     # Then run any ALTER statements for schema evolution
-    # (ADD COLUMN IF NOT EXISTS is safe to run even if columns already exist)
     with engine.begin() as conn:
         conn.execute(text("""
             ALTER TABLE public.processed_rfps 
