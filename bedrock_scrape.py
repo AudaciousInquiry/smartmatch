@@ -310,7 +310,15 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
                 logger.info(f"Skipping previously-excluded: {title}")
                 continue
 
-            final_url, final_title, final_text = navigate_to_final(detail_src, existing=[], max_hops=max_hops, per_page_max_text=per_page_max_text)
+            # Seed navigation with the item's title and anchor text so direct PDFs won't be titled "(PDF)"
+            final_url, final_title, final_text = navigate_to_final(
+                detail_src,
+                existing=[],
+                max_hops=max_hops,
+                per_page_max_text=per_page_max_text,
+                initial_title=title,
+                initial_link_text=(links[idx].get("text") if isinstance(idx, int) and 0 <= idx < len(links) else None),
+            )
             if not final_url or not final_text:
                 logger.info(f"Navigation failed to resolve final RFP for '{title}' (transient, not excluded)")
                 # Treat as transient: do NOT persist exclusion; allow future retry
@@ -431,6 +439,33 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
                 except Exception:
                     logger.exception(f"Failed to summarize final page for {final_url}")
 
+            # If the chosen title is weak (e.g., "(PDF)") but the summary clearly contains the title, override from the summary's first heading line
+            if ai_summary:
+                try:
+                    def _is_generic_title(t: Optional[str]) -> bool:
+                        if not t:
+                            return True
+                        s = (t or "").strip().lower()
+                        if not s:
+                            return True
+                        s = s.replace("(pdf)", "").strip()
+                        generics = {
+                            "rfp", "rfa", "rfi", "request for applications", "request for application",
+                            "request for proposals", "request for proposal", "request for information", "pdf"
+                        }
+                        return s in generics or len(s) < 4
+                    if _is_generic_title(chosen_title):
+                        first = ai_summary.splitlines()[0].strip()
+                        if first.startswith("#"):
+                            first = first.lstrip("#").strip()
+                        # Handle patterns like "Summary of RFP: <Title>" or "RFP Summary: <Title>"
+                        parts = first.split(":", 1)
+                        maybe = parts[1].strip() if len(parts) == 2 else first
+                        if maybe and not _is_generic_title(maybe) and 6 <= len(maybe) <= 200:
+                            chosen_title = maybe
+                except Exception:
+                    pass
+
             detail_content = sanitize_text(detail_content) or None
             if ai_summary:
                 ai_summary = sanitize_text(ai_summary)
@@ -469,7 +504,7 @@ def _fetch_links_and_text(url: str, max_text: int = 20000, max_links: int = 120)
     lnks = gather_links(soup, url, max_links=max_links, page_url=url)
     return txt, lnks
 
-def navigate_to_final(start_url: str, existing: List[Dict[str,str]], max_hops: int, per_page_max_text: int = 16000) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def navigate_to_final(start_url: str, existing: List[Dict[str,str]], max_hops: int, per_page_max_text: int = 16000, *, initial_title: Optional[str] = None, initial_link_text: Optional[str] = None) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     # Iteratively navigate to the final RFP page or PDF.
     # Uses the NAV prompt to either stop on a final page, continue to a single
     # best next link, or give up/expire. Returns:
@@ -478,7 +513,8 @@ def navigate_to_final(start_url: str, existing: List[Dict[str,str]], max_hops: i
     # PDFs are parsed via detail_extractor to provide normalized text.
     visited = set()
     current_url = start_url
-    final_title = None
+    # Prefer initial link text or provided title as a seed for PDFs
+    final_title = (initial_link_text or initial_title) or None
     for hop in range(1, max_hops + 1):
         if current_url in visited:
             logger.info(f"Loop detected at {current_url}; aborting navigation")
@@ -493,10 +529,11 @@ def navigate_to_final(start_url: str, existing: List[Dict[str,str]], max_hops: i
             try:
                 text, pdf_url = extract_detail(current_url, referer=current_url)
                 if text and pdf_url:
-                    return pdf_url, "(PDF)" if not final_title else final_title, text
+                    return pdf_url, (final_title or "(PDF)"), text
             except Exception:
                 logger.exception(f"Failed to extract PDF at {current_url}")
-            return current_url, "(PDF)" if not final_title else final_title, page_text
+            return current_url, (final_title or "(PDF)"), page_text
+
         nav_prompt = llm_utils.build_nav_prompt(page_text, page_links, existing, current_url, hop, max_hops)
         try:
             raw = llm_utils.call_bedrock(nav_prompt, system=llm_utils.SCRAPE_NAV_SYSTEM, temperature=0.0, max_tokens=1200)
