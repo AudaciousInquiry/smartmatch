@@ -294,6 +294,8 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
             idx = item.get("detail_link_index")
             if not title or not url:
                 continue
+            # Capture authoritative listing title from the page's anchor text when available
+            listing_title = title
             if not isinstance(idx, int) or not (0 <= idx < len(links)):
                 logger.warning(f"Skipping item '{title}': missing or invalid detail_link_index={idx}")
                 continue
@@ -303,6 +305,12 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
             if normalize_url(detail_src) == normalize_url(page_url):
                 logger.warning(f"Skipping item '{title}': model selected listing URL as detail link")
                 continue
+            try:
+                anchor_text = (links[idx].get("text") or "").strip()
+                if anchor_text and not _is_generic_title(anchor_text):
+                    listing_title = anchor_text
+            except Exception:
+                pass
 
             # Precompute a hash for early exclusion checks (title+listing URL)
             h = hashlib.sha256((title + url).encode("utf-8")).hexdigest()
@@ -316,14 +324,15 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
                 existing=[],
                 max_hops=max_hops,
                 per_page_max_text=per_page_max_text,
-                initial_title=title,
+                initial_title=listing_title,
                 initial_link_text=(links[idx].get("text") if isinstance(idx, int) and 0 <= idx < len(links) else None),
             )
             if not final_url or not final_text:
                 logger.info(f"Navigation failed to resolve final RFP for '{title}' (transient, not excluded)")
-                # Treat as transient: do NOT persist exclusion; allow future retry
                 continue
-
+            # Prefer non-generic listing title if nav title is generic or missing
+            if (not final_title or _is_generic_title(final_title)) and not _is_generic_title(listing_title):
+                final_title = listing_title
             # Always extract PDF text if final URL is a PDF (even if some text exists)
             try:
                 if is_pdf(final_url):
@@ -402,7 +411,7 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
                 continue
 
             # Prefer the final page's title when available
-            chosen_title = final_title.strip() if final_title else title
+            chosen_title = final_title.strip() if final_title else listing_title
 
             pdf_bytes = None
             try:
@@ -439,32 +448,19 @@ def upsert_new_items(engine, processed_table, site_name: str, items: List[Dict[s
                 except Exception:
                     logger.exception(f"Failed to summarize final page for {final_url}")
 
-            # If the chosen title is weak (e.g., "(PDF)") but the summary clearly contains the title, override from the summary's first heading line
-            if ai_summary:
-                try:
-                    def _is_generic_title(t: Optional[str]) -> bool:
-                        if not t:
-                            return True
-                        s = (t or "").strip().lower()
-                        if not s:
-                            return True
-                        s = s.replace("(pdf)", "").strip()
-                        generics = {
-                            "rfp", "rfa", "rfi", "request for applications", "request for application",
-                            "request for proposals", "request for proposal", "request for information", "pdf"
-                        }
-                        return s in generics or len(s) < 4
-                    if _is_generic_title(chosen_title):
-                        first = ai_summary.splitlines()[0].strip()
-                        if first.startswith("#"):
-                            first = first.lstrip("#").strip()
-                        # Handle patterns like "Summary of RFP: <Title>" or "RFP Summary: <Title>"
-                        parts = first.split(":", 1)
-                        maybe = parts[1].strip() if len(parts) == 2 else first
-                        if maybe and not _is_generic_title(maybe) and 6 <= len(maybe) <= 200:
-                            chosen_title = maybe
-                except Exception:
-                    pass
+            # (Removed legacy summary heading override that caused prompt-echo titles)
+
+            # Summary override only if both chosen & listing are generic
+            if ai_summary and _is_generic_title(chosen_title):
+                if not _is_generic_title(listing_title):
+                    chosen_title = listing_title
+                else:
+                    cand = _extract_title_from_summary(ai_summary)
+                    if cand and not _is_generic_title(cand):
+                        chosen_title = cand
+            # Final fallback: if still generic & listing non-generic
+            if _is_generic_title(chosen_title) and not _is_generic_title(listing_title):
+                chosen_title = listing_title
 
             detail_content = sanitize_text(detail_content) or None
             if ai_summary:
@@ -602,6 +598,59 @@ def navigate_to_final(start_url: str, existing: List[Dict[str,str]], max_hops: i
         return None, None, None
     logger.info(f"Reached hop limit ({max_hops}) without final RFP: {start_url}")
     return None, None, None
+
+# --- Generic title handling helpers ---
+GENERIC_TITLE_SET = {
+    'rfp','rfa','rfi','request for applications','request for application',
+    'request for proposals','request for proposal','request for information','pdf','(pdf)',
+    'untitled rfp','opportunity','solicitation'
+}
+GENERIC_PREFIXES = (
+    'summary of rfp','rfp summary','i will summarize','i\'ll summarize','this rfp','the rfp','summary:'
+)
+
+def _is_generic_title(t: Optional[str]) -> bool:
+    if not t:
+        return True
+    s = t.strip().lower()
+    if not s:
+        return True
+    # remove surrounding quotes & parenthetical pdf marker
+    s = s.strip('"\'')
+    s = s.replace('(pdf)','').strip()
+    if s in GENERIC_TITLE_SET:
+        return True
+    if len(s) < 4:
+        return True
+    # overly boilerplate patterns
+    for p in GENERIC_PREFIXES:
+        if s.startswith(p):
+            return True
+    # reject if mostly non-alpha
+    if sum(c.isalpha() for c in s) < 6:
+        return True
+    return False
+
+def _extract_title_from_summary(summary: str) -> Optional[str]:
+    try:
+        lines = [l.strip() for l in summary.splitlines() if l.strip()][:8]
+        for l in lines:
+            raw = l.lstrip('#').strip()
+            # skip boilerplate lines
+            low = raw.lower()
+            if any(low.startswith(p) for p in GENERIC_PREFIXES):
+                continue
+            # handle colon pattern
+            if ':' in raw:
+                left,right = raw.split(':',1)
+                cand = right.strip()
+                if cand and not _is_generic_title(cand) and 6 <= len(cand) <= 200:
+                    return cand[:200]
+            if not _is_generic_title(raw) and 6 <= len(raw) <= 200:
+                return raw[:200]
+    except Exception:
+        pass
+    return None
 
 def main():
     # CLI entrypoint for probing a single listing URL.
