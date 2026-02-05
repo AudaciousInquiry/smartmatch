@@ -14,6 +14,8 @@ from contextlib import asynccontextmanager
 import asyncio
 import os
 from zoneinfo import ZoneInfo
+import hashlib
+import secrets
 
 from configuration_values import ConfigurationValues
 from email_utils import send_email
@@ -79,6 +81,16 @@ website_settings = Table(
     Column("updated_at", DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow),    
 )
 
+users = Table(
+    "users", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("username", String, nullable=False, unique=True),
+    Column("password_hash", String, nullable=False),
+    Column("email", String),
+    Column("created_at", DateTime, default=datetime.datetime.utcnow),
+    Column("updated_at", DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow),
+)
+
 processed_rfps = Table(
     "processed_rfps", metadata,
     Column("hash", String, primary_key=True),
@@ -90,6 +102,21 @@ processed_rfps = Table(
     Column("ai_summary", String),
     Column("pdf_content", LargeBinary)
 )
+
+def hash_password(password: str) -> str:
+    """Hash a password using SHA-256 with salt."""
+    salt = secrets.token_hex(16)
+    pwd_hash = hashlib.sha256((password + salt).encode()).hexdigest()
+    return f"{salt}${pwd_hash}"
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """Verify a password against its hash."""
+    try:
+        salt, pwd_hash = password_hash.split('$')
+        new_hash = hashlib.sha256((password + salt).encode()).hexdigest()
+        return new_hash == pwd_hash
+    except:
+        return False
 
 def init_db():
     # First, ensure all tables exist, so we are prepared on first run
@@ -103,6 +130,23 @@ def init_db():
             ADD COLUMN IF NOT EXISTS ai_summary TEXT,
             ADD COLUMN IF NOT EXISTS pdf_content BYTEA;
         """))
+        
+        # Create default admin user if no users exist
+        existing_users = conn.execute(select(users)).first()
+        if not existing_users:
+            # Default credentials: admin / admin123
+            # CHANGE THIS IN PRODUCTION!
+            default_password_hash = hash_password("admin123")
+            conn.execute(
+                insert(users).values(
+                    username="admin",
+                    password_hash=default_password_hash,
+                    email="admin@smartmatch.local",
+                    created_at=datetime.datetime.utcnow(),
+                    updated_at=datetime.datetime.utcnow(),
+                )
+            )
+            logger.warning("Created default admin user (username: admin, password: admin123) - CHANGE THIS IN PRODUCTION!")
 
 # Initialize database on startup
 init_db()
@@ -140,6 +184,16 @@ class WebsiteUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1)
     url: Optional[str] = Field(None, min_length=1)
     enabled: Optional[bool] = None
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    id: int
+    username: str
+    email: Optional[str]
+    message: str = "Login successful"
 
 # Creates the scraping schedule
 def get_or_create_config(conn):
@@ -206,6 +260,30 @@ def list_rfps(
 
         rows = conn.execute(query).mappings().all()
         return [dict(r) for r in rows]
+
+@app.post("/auth/login", response_model=LoginResponse)
+def login(request: LoginRequest):
+    """Authenticate user with username and password."""
+    with engine.connect() as conn:
+        # Find user by username
+        user_row = conn.execute(
+            select(users).where(users.c.username == request.username)
+        ).first()
+        
+        if not user_row:
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+        
+        # Verify password
+        if not verify_password(request.password, user_row.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+        
+        # Return user info (excluding password hash)
+        return LoginResponse(
+            id=user_row.id,
+            username=user_row.username,
+            email=user_row.email,
+            message="Login successful"
+        )
 
 @app.get("/schedule")
 def get_schedule():

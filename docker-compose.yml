@@ -46,8 +46,14 @@ services:
       - /app/node_modules  # Anonymous volume to prevent overwriting node_modules
       - /app/.next         # Anonymous volume for Next.js build cache
     environment:
-      # API URL for the frontend to connect to the backend
+      # API URL for the frontend to connect to the backend (client-side)
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      # Internal API URL for server-side authentication (Docker network)
+      - API_URL=http://app:8000
+      # AWS Cognito (pass from host environment or set directly)
+      - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
+      - COGNITO_CLIENT_SECRET=${COGNITO_CLIENT_SECRET}
+      - COGNITO_ISSUER=${COGNITO_ISSUER}
       # Enable file watching with polling for Windows + Docker so the frontend reloads on code changes
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
