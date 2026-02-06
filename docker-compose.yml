@@ -1,7 +1,7 @@
 services:
   postgres:
     image: pgvector/pgvector:0.8.0-pg17
-    container_name: smartmatchai_pgvector
+    container_name: "${COMPOSE_PROJECT_NAME:-smartmatchai}_pgvector"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: test
@@ -19,7 +19,7 @@ services:
 
   app:
     build: .
-    container_name: smartmatchai_app
+    container_name: "${COMPOSE_PROJECT_NAME:-smartmatchai}_app"
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,7 +36,7 @@ services:
 
   frontend:
     build: ./rfp-console
-    container_name: smartmatchai_frontend
+    container_name: "${COMPOSE_PROJECT_NAME:-smartmatchai}_frontend"
     depends_on:
       - app
     ports:
@@ -54,6 +54,9 @@ services:
       - COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
       - COGNITO_CLIENT_SECRET=${COGNITO_CLIENT_SECRET}
       - COGNITO_ISSUER=${COGNITO_ISSUER}
+      # Expose Cognito details to the browser for hosted UI logout
+      - NEXT_PUBLIC_COGNITO_DOMAIN=${COGNITO_DOMAIN}
+      - NEXT_PUBLIC_COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
       # Enable file watching with polling for Windows + Docker so the frontend reloads on code changes
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
